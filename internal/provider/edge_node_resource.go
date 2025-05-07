@@ -57,6 +57,7 @@ type EdgeNodeModel struct {
 	QmpSocket        types.String `tfsdk:"qmp_socket"`
 	VMRunning        types.Bool   `tfsdk:"vm_running"`
 	SSHPort          types.Int32  `tfsdk:"ssh_port"`
+	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
 }
 
 func (r *EdgeNode) getResourceDir(id string) string {
@@ -141,6 +142,13 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Description:         "Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed",
 				MarkdownDescription: "Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed",
 				Computed:            true,
+			},
+			"extra_qemu_args": schema.ListAttribute{
+				Description:         "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
+				MarkdownDescription: "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
+				ElementType:         types.StringType,
+				Optional:            true,
+				Required:            false,
 			},
 		},
 	}
@@ -252,6 +260,16 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 				-device tpm-tis,tpmdev=tpm0 test.img
 			*/
 		}...)
+	}
+
+	extraArgs := []string{}
+	if !data.ExtraArgs.IsNull() {
+		diags := data.ExtraArgs.ElementsAs(ctx, &extraArgs, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		qemuArgs = append(qemuArgs, extraArgs...)
 	}
 
 	startVMscript := `#!/usr/bin/env bash
