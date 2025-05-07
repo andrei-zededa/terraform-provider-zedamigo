@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
@@ -48,6 +49,7 @@ type EdgeNodeModel struct {
 	Name             types.String `tfsdk:"name"`
 	SerialNo         types.String `tfsdk:"serial_no"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
+	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVarsSrc      types.String `tfsdk:"ovmf_vars_src"`
@@ -97,6 +99,12 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				MarkdownDescription: "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
 				Optional:            false,
 				Required:            true,
+			},
+			"swtpm_socket": schema.StringAttribute{
+				Description:         "swtpm process unix socket",
+				MarkdownDescription: "swtpm process unix socket",
+				Optional:            true,
+				Required:            false,
 			},
 			"disk_image": schema.StringAttribute{
 				Description:         "Edge Node disk image",
@@ -229,6 +237,36 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
 
+	swtpmSock := data.SwTPMSock.ValueString()
+	if swtpmSock != "" {
+		qemuArgs = append(qemuArgs, []string{
+			// Define the character device connected to the swtpm socket.
+			"-chardev", fmt.Sprintf("socket,id=chrtpm,path=%s", swtpmSock),
+			// Define the TPM backend device using the character device.
+			"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
+			// Add the virtual TPM device to the VM (use tpm-crb for TPM 2.0).
+			"-device", "tpm-crb,id=mytpm,tpmdev=tpm0",
+			/*
+				-chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock \
+				-tpmdev emulator,id=tpm0,chardev=chrtpm \
+				-device tpm-tis,tpmdev=tpm0 test.img
+			*/
+		}...)
+	}
+
+	startVMscript := `#!/usr/bin/env bash
+
+set -eu;
+
+#### QEMU ARGS: %v
+
+%s %s
+`
+	blob := []byte(fmt.Sprintf(startVMscript, qemuArgs, r.providerConf.Qemu, strings.Join(qemuArgs, " ")))
+	if err := os.WriteFile(filepath.Join(d, "start_vm.bash"), blob, 0o755); err != nil {
+		tflog.Debug(ctx, "Failed to write start VM script", map[string]any{"error": err})
+	}
+
 	res, err = cmd.RunDetached(d, r.providerConf.Qemu, qemuArgs...)
 	if err != nil {
 		resp.Diagnostics.AddError("Edge Node Resource Error",
@@ -241,8 +279,9 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 
 	x, err := readEdgeNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
-		resp.Diagnostics.AddError("Edge Node Resource Read Error",
+		resp.Diagnostics.AddWarning("Edge Node Resource Read Error",
 			fmt.Sprintf("Can't read EVE-OS console log: %v", err))
+
 		return
 	}
 
@@ -253,7 +292,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 }
 
 func readEdgeNode(_ *ZedAmigoProviderConfig, path string) (bool, error) {
-	mon, err := qmp.NewSocketMonitor("unix", filepath.Join(path, "qmp.socket"), 2*time.Second)
+	mon, err := qmp.NewSocketMonitor("unix", filepath.Join(path, "qmp.socket"), 1*time.Second)
 	if err != nil {
 		return false, fmt.Errorf("%w", err)
 	}
@@ -303,12 +342,16 @@ func (r *EdgeNode) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
-	_, err := readEdgeNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
+	x, err := readEdgeNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
-		resp.Diagnostics.AddError("Edge Node Resource Read Error",
-			fmt.Sprintf("Can't read EVE-OS console log: %v", err))
-		return
+		resp.Diagnostics.AddWarning("Edge Node Resource Read Warning",
+			fmt.Sprintf("Treating this as a warning since most likely"+
+				" the corresponding QEMU instance is not running anymore."+
+				" Can't read EVE-OS console log: %v", err))
+		data.VMRunning = types.BoolValue(false)
 	}
+
+	data.VMRunning = types.BoolValue(x)
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

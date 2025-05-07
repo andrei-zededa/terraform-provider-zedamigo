@@ -48,6 +48,7 @@ type InstalledNodeModel struct {
 	SerialNo         types.String `tfsdk:"serial_no"`
 	InstallerISO     types.String `tfsdk:"installer_iso"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
+	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
@@ -100,6 +101,12 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
 				Optional:            false,
 				Required:            true,
+			},
+			"swtpm_socket": schema.StringAttribute{
+				Description:         "swtpm process unix socket",
+				MarkdownDescription: "swtpm process unix socket",
+				Optional:            true,
+				Required:            false,
 			},
 			"disk_image": schema.StringAttribute{
 				Description:         "Installed Edge Node disk image",
@@ -213,6 +220,23 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
+
+	swtpmSock := data.SwTPMSock.ValueString()
+	if swtpmSock != "" {
+		qemuArgs = append(qemuArgs, []string{
+			// Define the character device connected to the swtpm socket.
+			"-chardev", fmt.Sprintf("socket,id=chrtpm,path=%s", swtpmSock),
+			// Define the TPM backend device using the character device.
+			"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
+			// Add the virtual TPM device to the VM (use tpm-crb for TPM 2.0).
+			"-device", "tpm-crb,id=mytpm,tpmdev=tpm0",
+			/*
+				-chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock \
+				-tpmdev emulator,id=tpm0,chardev=chrtpm \
+				-device tpm-tis,tpmdev=tpm0 test.img
+			*/
+		}...)
+	}
 
 	res, err = cmd.Run(d, r.providerConf.Qemu, qemuArgs...)
 	if err != nil {

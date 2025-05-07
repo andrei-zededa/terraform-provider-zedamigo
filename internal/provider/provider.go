@@ -43,6 +43,8 @@ type ZedAmigoProviderConfig struct {
 	Qemu    string
 	QemuImg string
 	Docker  string
+	Swtpm   string
+	Bash    string
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -204,6 +206,36 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	}
 	zaConf.Docker = do
 
+	st, err := exec.LookPath("swtpm")
+	if err != nil {
+		resp.Diagnostics.AddError("Can't find the `swtpm` executable.",
+			fmt.Sprintf("Can't find the `swtpm` executable, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.Swtpm = st
+	if stAbs, err := filepath.Abs(st); err != nil {
+		tflog.Debug(ctx, "filepath.Abs error", map[string]any{"error": err})
+	} else {
+		zaConf.Swtpm = stAbs
+		if stReal, err := filepath.EvalSymlinks(stAbs); err != nil {
+			tflog.Debug(ctx, "filepath.EvalSymlinks error", map[string]any{"error": err})
+		} else {
+			zaConf.Swtpm = stReal
+		}
+	}
+
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		resp.Diagnostics.AddError("Can't find bash.",
+			fmt.Sprintf("Can't find bash, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.Bash = bash
+
 	// Make the provider config available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = &zaConf
@@ -218,12 +250,13 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewEveInstaller,
 		NewInstalledNode,
 		NewEdgeNode,
+		NewSwTPM,
 	}
 }
 
 func (p *ZedAmigoProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewSystemMemoryDataSource,
+		NewSystemInfoDataSource,
 		NewEveInstallerDataSource,
 	}
 }

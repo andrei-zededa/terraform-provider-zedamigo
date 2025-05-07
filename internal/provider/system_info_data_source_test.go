@@ -12,8 +12,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
-const testAccSystemMemoryDataSourceConfig = `
-data "zedamigo_system_memory" "test" {
+const testAccSystemInfoDataSourceConfig = `
+data "zedamigo_system_info" "test" {
 }
 `
 
@@ -29,10 +29,10 @@ func TestAccSystemMemoryDataSource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Read testing
 			{
-				Config: testAccSystemMemoryDataSourceConfig,
+				Config: testAccSystemInfoDataSourceConfig,
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
-						"data.zedamigo_system_memory.test",
+						"data.zedamigo_system_info.test",
 						tfjsonpath.New("id"),
 						knownvalue.StringExact(hostname),
 					),

@@ -1,1 +1,2 @@
-terraform-provider-zedamigo
+terraform-provider-zedamigo*
+**/*.tfstate*
