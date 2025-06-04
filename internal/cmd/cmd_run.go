@@ -43,6 +43,13 @@ func Run(logPath string, command string, args ...string) (Result, error) {
 	}
 	defer errFile.Close()
 
+	if err := os.WriteFile(filepath.Join(logPath, fmt.Sprintf("%s_%s_command.log", timestamp, cmdName)),
+		[]byte(fmt.Sprintf("command=%s args=%v\n", command, args)),
+		0o600); err != nil {
+		result.Error = fmt.Errorf("failed to create command log file: %w", err)
+		return result, result.Error
+	}
+
 	cmd := exec.Command(command, args...)
 
 	// Create pipes for capturing output.
@@ -129,6 +136,13 @@ func RunDetached(logPath string, command string, args ...string) (Result, error)
 	if err != nil {
 		outFile.Close()
 		result.Error = fmt.Errorf("failed to create stderr file: %w", err)
+		return result, result.Error
+	}
+
+	if err := os.WriteFile(filepath.Join(logPath, fmt.Sprintf("%s_%s_command.log", timestamp, cmdName)),
+		[]byte(fmt.Sprintf("command=%s args=%v\n", command, args)),
+		0o600); err != nil {
+		result.Error = fmt.Errorf("failed to create command log file: %w", err)
 		return result, result.Error
 	}
 

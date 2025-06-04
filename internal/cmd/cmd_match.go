@@ -47,6 +47,13 @@ func RunMatch(logPath string, waitPattern string, timeout time.Duration, command
 	}
 	defer errFile.Close()
 
+	if err := os.WriteFile(filepath.Join(logPath, fmt.Sprintf("%s_%s_command.log", timestamp, cmdName)),
+		[]byte(fmt.Sprintf("command=%s args=%v\n", command, args)),
+		0o600); err != nil {
+		result.Error = fmt.Errorf("failed to create command log file: %w", err)
+		return result, result.Error
+	}
+
 	// Create a context with the specified timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
