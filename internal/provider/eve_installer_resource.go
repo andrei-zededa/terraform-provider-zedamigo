@@ -142,6 +142,11 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
+	if err := createTFBackPointer(d); err != nil {
+		resp.Diagnostics.AddError("Disk Image Resource Error",
+			fmt.Sprintf("Unable to create resource specific file: %s", err))
+		return
+	}
 	if err := os.MkdirAll(filepath.Join(d, "config"), 0o700); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))

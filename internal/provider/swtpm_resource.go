@@ -143,6 +143,11 @@ func (r *SwTPM) Create(ctx context.Context, req resource.CreateRequest, resp *re
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
+	if err := createTFBackPointer(d); err != nil {
+		resp.Diagnostics.AddError("Disk Image Resource Error",
+			fmt.Sprintf("Unable to create resource specific file: %s", err))
+		return
+	}
 
 	if running, _, _ := readMonitorPID(r.providerConf, d); running {
 		resp.Diagnostics.AddError("SwTPM Resource Error",

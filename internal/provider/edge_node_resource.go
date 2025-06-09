@@ -201,6 +201,11 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
+	if err := createTFBackPointer(d); err != nil {
+		resp.Diagnostics.AddError("Disk Image Resource Error",
+			fmt.Sprintf("Unable to create resource specific file: %s", err))
+		return
+	}
 	data.DiskImg = types.StringValue(filepath.Join(d, "disk0.disk_img.qcow2"))
 	res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2",
 		"-b", data.DiskImgBase.ValueString(), "-F", "qcow2", data.DiskImg.ValueString())

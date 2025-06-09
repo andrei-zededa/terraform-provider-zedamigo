@@ -142,6 +142,11 @@ func (r *DiskImage) Create(ctx context.Context, req resource.CreateRequest, resp
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
+	if err := createTFBackPointer(d); err != nil {
+		resp.Diagnostics.AddError("Disk Image Resource Error",
+			fmt.Sprintf("Unable to create resource specific file: %s", err))
+		return
+	}
 	i := fmt.Sprintf("%s.disk_img.qcow2", filepath.Join(d, data.Name.ValueString()))
 	res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2", i,
 		fmt.Sprintf("%sM", data.SizeMB.String()))
@@ -251,4 +256,21 @@ func (r *DiskImage) Delete(ctx context.Context, req resource.DeleteRequest, resp
 
 func (r *DiskImage) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// createTFBackPointer will create a file that points to the source directory
+// of the TF configuration that created a specific resource. This is useful for
+// finding orphaned resources created by old/no-longer-existing configs.
+func createTFBackPointer(path string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("createTFBackPointer: %w", err)
+	}
+
+	f := filepath.Join(path, "config_source_dir.tf")
+	if err := os.WriteFile(f, []byte("# "+wd), 0o640); err != nil {
+		return fmt.Errorf("createTFBackPointer: %w", err)
+	}
+
+	return nil
 }
