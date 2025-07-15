@@ -44,6 +44,10 @@ type EveInstallerModel struct {
 	Name     types.String `tfsdk:"name"`
 	Tag      types.String `tfsdk:"tag"`
 	Cluster  types.String `tfsdk:"cluster"`
+	TLSCA    types.String `tfsdk:"tls_ca"`
+	ObjCA    types.String `tfsdk:"object_signing_ca"`
+	Hosts    types.String `tfsdk:"additional_hosts"`
+	SSHKey   types.String `tfsdk:"authorized_keys"`
 	Filename types.String `tfsdk:"filename"`
 }
 
@@ -87,6 +91,30 @@ func (r *EveInstaller) Schema(ctx context.Context, req resource.SchemaRequest, r
 				MarkdownDescription: "Zedcloud cluster hostname",
 				Optional:            false,
 				Required:            true,
+			},
+			"tls_ca": schema.StringAttribute{
+				Description:         "The CA that signed the TLS server certificate (PEM), see `v2tlsbaseroot-certificates.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md",
+				MarkdownDescription: "The CA that signed the TLS server certificate (PEM), see `v2tlsbaseroot-certificates.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md",
+				Optional:            true,
+				Required:            false,
+			},
+			"object_signing_ca": schema.StringAttribute{
+				Description:         "The CA that signed the internal controller certificate, see `root-certificate.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md",
+				MarkdownDescription: "The CA that signed the internal controller certificate, see `root-certificate.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md",
+				Optional:            true,
+				Required:            false,
+			},
+			"additional_hosts": schema.StringAttribute{
+				Description:         "Additional entries that will be appended to /etc/hosts of the installed edge-node",
+				MarkdownDescription: "Additional entries that will be appended to /etc/hosts of the installed edge-node",
+				Optional:            true,
+				Required:            false,
+			},
+			"authorized_keys": schema.StringAttribute{
+				Description:         "SSH public key (unsure if multiple are supported) that is configured on the installed edge-node for SSH prior to onboarding",
+				MarkdownDescription: "SSH public key (unsure if multiple are supported) that is configured on the installed edge-node for SSH prior to onboarding",
+				Optional:            true,
+				Required:            false,
 			},
 			"filename": schema.StringAttribute{
 				Description:         "Full path/filename of the resulting installer file",
@@ -156,6 +184,41 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Can't write /config/server file: %s", err))
 		return
+	}
+	tlsCA := data.TLSCA.ValueString()
+	if len(tlsCA) > 0 {
+		if err := os.WriteFile(filepath.Join(d, "config", "v2tlsbaseroot-certificates.pem"), []byte(tlsCA), 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/v2tlsbaseroot-certificates.pem file: %s", err))
+			return
+		}
+	}
+	objCA := data.ObjCA.ValueString()
+	if len(objCA) > 0 {
+		if err := os.WriteFile(filepath.Join(d, "config", "root-certificate.pem"), []byte(objCA), 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/root-certificate.pem file: %s", err))
+			return
+		}
+	}
+	hosts := data.Hosts.ValueString()
+	if len(hosts) > 0 {
+		if err := os.WriteFile(filepath.Join(d, "config", "hosts"), []byte(hosts), 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/hosts file: %s", err))
+			return
+		}
+	}
+	sshKey := data.SSHKey.ValueString()
+	if len(sshKey) > 0 {
+		// Ensure that the result file has at least one newline, otherwise
+		// it is not processed correctly.
+		b := []byte(sshKey + "\n")
+		if err := os.WriteFile(filepath.Join(d, "config", "authorized_keys"), b, 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/authorized_keys file: %s", err))
+			return
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(d, "out"), 0o700); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
