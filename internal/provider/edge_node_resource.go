@@ -48,6 +48,8 @@ type EdgeNodeModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	SerialNo         types.String `tfsdk:"serial_no"`
+	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
+	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
@@ -95,6 +97,22 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:            false,
 				Required:            true,
 			},
+			"serial_port_server": schema.BoolAttribute{
+				Description:         "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
+				MarkdownDescription: "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
+				Optional:            true,
+				Required:            false,
+			},
+			"serial_port_socket": schema.StringAttribute{
+				Description:         "If serial_port_server is true then this will contain the file path of the UNIX socket for the serial port server",
+				MarkdownDescription: "If serial_port_server is true then this will contain the file path of the UNIX socket for the serial port server",
+				Computed:            true,
+			},
+			"serial_console_log": schema.StringAttribute{
+				Description:         "Edge Node log file of serial console output if serial_port_server is false",
+				MarkdownDescription: "Edge Node log file of serial console output if serial_port_server is false",
+				Computed:            true,
+			},
 			"disk_image_base": schema.StringAttribute{
 				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
 				MarkdownDescription: "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
@@ -110,11 +128,6 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 			"disk_image": schema.StringAttribute{
 				Description:         "Edge Node disk image",
 				MarkdownDescription: "Edge Node disk image",
-				Computed:            true,
-			},
-			"serial_console_log": schema.StringAttribute{
-				Description:         "Edge Node log file of serial console output",
-				MarkdownDescription: "Edge Node log file of serial console output",
 				Computed:            true,
 			},
 			"ovmf_vars_src": schema.StringAttribute{
@@ -223,8 +236,6 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 	data.OvmfVars = types.StringValue(varsFile)
 
-	data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_run.log"))
-
 	data.QmpSocket = types.StringValue(fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")))
 
 	qemuArgs := []string{}
@@ -242,7 +253,6 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-device", "intel-iommu,intremap=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
 		"-nic", fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32()),
-		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
 		"-drive", fmt.Sprintf("file=%s,format=qcow2", data.DiskImg.ValueString()),
@@ -265,6 +275,16 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 				-device tpm-tis,tpmdev=tpm0 test.img
 			*/
 		}...)
+	}
+
+	if data.SerialPortServer.ValueBool() {
+		data.SerialPortSocket = types.StringValue(filepath.Join(d, "serial_port.socket"))
+		data.SerialConsoleLog = types.StringValue("")
+		qemuArgs = append(qemuArgs, []string{"-serial", fmt.Sprintf("unix:%s,server,nowait", data.SerialPortSocket.ValueString())}...)
+	} else {
+		data.SerialPortSocket = types.StringValue("")
+		data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_run.log"))
+		qemuArgs = append(qemuArgs, []string{"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString())}...)
 	}
 
 	extraArgs := []string{}
