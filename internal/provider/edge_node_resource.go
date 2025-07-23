@@ -47,6 +47,8 @@ type EdgeNode struct {
 type EdgeNodeModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
+	Mem              types.String `tfsdk:"mem"`
+	CPUs             types.String `tfsdk:"cpus"`
 	SerialNo         types.String `tfsdk:"serial_no"`
 	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
 	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
@@ -88,6 +90,18 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 			"name": schema.StringAttribute{
 				Description:         "Edge Node name",
 				MarkdownDescription: "Edge Node name",
+				Optional:            true,
+				Required:            false,
+			},
+			"mem": schema.StringAttribute{
+				Description:         "Amount of memory that the VM running the edge node will have. Default: 4G. Valid options: `4096`, `4096M`, `4G`.",
+				MarkdownDescription: "Amount of memory that the VM running the edge node will have. Default: 4G. Valid options: `4096`, `4096M`, `4G`.",
+				Optional:            true,
+				Required:            false,
+			},
+			"cpus": schema.StringAttribute{
+				Description:         "Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.",
+				MarkdownDescription: "Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.",
 				Optional:            true,
 				Required:            false,
 			},
@@ -248,8 +262,20 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	qemuArgs = append(qemuArgs, []string{
 		"--enable-kvm", "-machine", "q35,accel=kvm,kernel-irqchip=split",
 		"-nographic",
-		"-m", "4096",
-		"-cpu", "host", "-smp", "4,cores=2",
+	}...)
+
+	mem := "4G"
+	if !data.Mem.IsNull() {
+		mem = data.Mem.ValueString()
+	}
+	cpus := "4"
+	if !data.CPUs.IsNull() {
+		cpus = data.CPUs.ValueString()
+	}
+
+	qemuArgs = append(qemuArgs, []string{
+		"-m", mem,
+		"-cpu", "host", "-smp", cpus,
 		"-device", "intel-iommu,intremap=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
 		"-nic", fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32()),
