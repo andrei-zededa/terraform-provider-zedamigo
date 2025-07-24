@@ -1,0 +1,114 @@
+#cloud-config
+
+# Grow the root filesystem to maximum size, first the partition.
+growpart:
+  mode: auto
+  devices: ['/']
+  ignore_growroot_disabled: false
+
+# Grow the filesystem after growing the partition.
+runcmd:
+  - 'resize2fs /dev/root'
+
+# Create an user with SSH authentication.
+users:
+  - name: andrei
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID7DLllDbRg3j5oVJyWrAGtzEsS7RAVJIu0sG7kirZUV andrei@zededa.com
+
+# Remove all users except just the one creted and required system users.
+userdel:
+  remove: true
+  force: true
+  users:
+    - ubuntu
+    - cloud-user
+    - ec2-user
+    - centos
+    - admin
+    - default
+    - user
+
+# Keep only essential system users.
+preserve_users:
+  - root
+  - joe
+  - systemd-network
+  - systemd-resolve
+  - systemd-timesync
+  - messagebus
+  - syslog
+  - _apt
+  - nobody
+  - systemd-coredump
+
+# Set password authentication to false for enhanced security.
+ssh_pwauth: false
+
+# Install additional packages.
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - wget
+  - gnupg
+  - lsb-release
+  - htop
+  - vim
+  - unzip
+  - git
+  - tmux
+  - jq
+  - net-tools
+  - dnsutils
+  
+# Update the package list and upgrade all packages on first boot.
+package_update: true
+package_upgrade: true
+
+# Create a mount point directory.
+runcmd:
+  - 'resize2fs /dev/root'
+  - 'mkdir -p /mnt/shared'
+  - 'chmod 777 /mnt/shared'
+
+# # Mount 9p shared directory
+# mounts:
+#   - [ "hostshare", "/mnt/shared", "9p", "trans=virtio,version=9p2000.L,rw", "0", "0" ]
+
+# Configure SSH(d).
+ssh:
+  install-server: true
+  disable_root: true
+  ssh_deletekeys: true
+  ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+# Install docker.
+runcmd:
+  - 'resize2fs /dev/root'
+  - 'mkdir -p /mnt/shared'
+  - 'chmod 777 /mnt/shared'
+
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  - chmod a+r /etc/apt/keyrings/docker.gpg
+  
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}) stable" > /etc/apt/sources.list.d/docker.list
+
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  
+  - systemctl enable docker
+  - systemctl start docker
+  
+  - id andrei >/dev/null 2>&1 && usermod -aG docker andrei || echo "User andrei not found, skipping docker group add."
+  
+  - docker run --rm hello-world
+
+# Final message on login screen
+final_message: "Docker has been installed successfully. System is ready after $UPTIME seconds."

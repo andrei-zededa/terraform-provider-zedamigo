@@ -251,6 +251,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewInstalledNode,
 		NewEdgeNode,
 		NewSwTPM,
+		NewCloudInitISO,
 	}
 }
 
