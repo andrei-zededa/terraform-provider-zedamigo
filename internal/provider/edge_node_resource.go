@@ -53,6 +53,8 @@ type EdgeNodeModel struct {
 	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
 	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
+	DiskSizeMB       types.Int64  `tfsdk:"disk_size_mb"`
+	DriveIf          types.String `tfsdk:"drive_if"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
@@ -133,6 +135,18 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:            false,
 				Required:            true,
 			},
+			"disk_size_mb": schema.Int64Attribute{
+				Description:         "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
+				MarkdownDescription: "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
+				Optional:            true,
+				Required:            false,
+			},
+			"drive_if": schema.StringAttribute{
+				Description:         "The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.",
+				MarkdownDescription: "The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.",
+				Optional:            true,
+				Required:            false,
+			},
 			"swtpm_socket": schema.StringAttribute{
 				Description:         "swtpm process unix socket",
 				MarkdownDescription: "swtpm process unix socket",
@@ -147,8 +161,8 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 			"ovmf_vars_src": schema.StringAttribute{
 				Description:         "UEFI OVMF vars source file (likely from the corresponding installed edge node)",
 				MarkdownDescription: "UEFI OVMF vars source file (likely from the corresponding installed edge node)",
-				Optional:            false,
-				Required:            true,
+				Optional:            true,
+				Required:            false,
 			},
 			"ovmf_vars": schema.StringAttribute{
 				Description:         "UEFI OVMF vars file specific for this edge node",
@@ -234,8 +248,15 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 	data.DiskImg = types.StringValue(filepath.Join(d, "disk0.disk_img.qcow2"))
-	res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2",
-		"-b", data.DiskImgBase.ValueString(), "-F", "qcow2", data.DiskImg.ValueString())
+	qemuImgArgs := []string{
+		"create", "-f", "qcow2",
+		"-b", data.DiskImgBase.ValueString(), "-F", "qcow2",
+		data.DiskImg.ValueString(),
+	}
+	if !data.DiskSizeMB.IsNull() {
+		qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%sM", data.DiskSizeMB.String()))
+	}
+	res, err := cmd.Run(d, r.providerConf.QemuImg, qemuImgArgs...)
 	if err != nil {
 		resp.Diagnostics.AddError("Edge Node Resource Error",
 			"Unable to create a new disk image")
@@ -244,7 +265,11 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 
 	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
-	if _, err := cmd.CopyFile(data.OvmfVarsSrc.ValueString(), varsFile); err != nil {
+	ovSrc := ovmfVars
+	if !data.OvmfVarsSrc.IsNull() {
+		ovSrc = data.OvmfVarsSrc.ValueString()
+	}
+	if _, err := cmd.CopyFile(ovSrc, varsFile); err != nil {
 		resp.Diagnostics.AddError("Edge Node Resource Error",
 			fmt.Sprintf("Unable to copy UEFI OVMF vars: %s", err))
 	}
@@ -281,10 +306,20 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-nic", fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
-		"-drive", fmt.Sprintf("file=%s,format=qcow2", data.DiskImg.ValueString()),
 		"-qmp", data.QmpSocket.ValueString(),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
+
+	if !data.DriveIf.IsNull() {
+		qemuArgs = append(qemuArgs, []string{
+			"-drive", fmt.Sprintf("file=%s,format=qcow2,if=%s",
+				data.DiskImg.ValueString(), data.DriveIf.ValueString()),
+		}...)
+	} else {
+		qemuArgs = append(qemuArgs, []string{
+			"-drive", fmt.Sprintf("file=%s,format=qcow2", data.DiskImg.ValueString()),
+		}...)
+	}
 
 	swtpmSock := data.SwTPMSock.ValueString()
 	if swtpmSock != "" {
