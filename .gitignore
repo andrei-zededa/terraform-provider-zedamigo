@@ -1,2 +1,3 @@
+internal/socket/cmd/socket-tailer/socket-tailer
 terraform-provider-zedamigo*
 **/*.tfstate*

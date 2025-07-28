@@ -341,7 +341,17 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	if data.SerialPortServer.ValueBool() {
 		data.SerialPortSocket = types.StringValue(filepath.Join(d, "serial_port.socket"))
 		data.SerialConsoleLog = types.StringValue("")
-		qemuArgs = append(qemuArgs, []string{"-serial", fmt.Sprintf("unix:%s,server,nowait", data.SerialPortSocket.ValueString())}...)
+		qemuArgs = append(qemuArgs, []string{"-serial", fmt.Sprintf("unix:%s,server,wait", data.SerialPortSocket.ValueString())}...)
+
+		data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_run.log"))
+		res, err = cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
+		if err != nil {
+			resp.Diagnostics.AddError("Edge Node Resource Error",
+				"Failed to run socket tailer")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+
 	} else {
 		data.SerialPortSocket = types.StringValue("")
 		data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_run.log"))
