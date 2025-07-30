@@ -4,6 +4,7 @@ go 1.24.1
 
 require (
 	github.com/adrg/xdg v0.5.3
+	github.com/davecgh/go-spew v1.1.1
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/google/go-tpm-tools v0.4.5
 	github.com/hashicorp/terraform-plugin-framework v1.14.1

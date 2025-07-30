@@ -36,15 +36,21 @@ var (
 )
 
 // ZedAmigoProviderConfig encapsulates the provider configuration such as that
-// it can be easily passed down to data sources and resources.
+// it can be easily passed down to data sources and resources. It mostly tracks
+// the exact paths of various commands(executables) that are needed by the various
+// resources of the provider.
 type ZedAmigoProviderConfig struct {
-	Target  string
-	LibPath string
-	Qemu    string
-	QemuImg string
-	Docker  string
-	Swtpm   string
-	Bash    string
+	Target      string
+	LibPath     string
+	UseSudo     bool
+	Sudo        string
+	Qemu        string
+	QemuImg     string
+	Docker      string
+	Swtpm       string
+	Bash        string
+	GenISOImage string
+	IP          string
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -68,6 +74,7 @@ type ZedAmigoProvider struct {
 type ZedAmigoProviderModel struct {
 	Target  types.String `tfsdk:"target"`
 	LibPath types.String `tfsdk:"lib_path"`
+	UseSudo types.Bool   `tfsdk:"use_sudo"`
 }
 
 func (p *ZedAmigoProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -86,6 +93,11 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 			"lib_path": schema.StringAttribute{
 				Description:         "The provider lib directory, where all disk images and other files are created on `target`. Default: `XDG_STATE_HOME/zedamigo`.",
 				MarkdownDescription: "The provider lib directory, where all disk images and other files are created on `target`. Default: `XDG_STATE_HOME/zedamigo`.",
+				Optional:            true,
+			},
+			"use_sudo": schema.BoolAttribute{
+				Description:         "Use `sudo` for running specific commands that need to be executed as the root user.",
+				MarkdownDescription: "Use `sudo` for running specific commands that need to be executed as the root user.",
 				Optional:            true,
 			},
 		},
@@ -176,6 +188,21 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 
+	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
+		zaConf.UseSudo = true
+		sudo, err := exec.LookPath("sudo")
+		if err != nil {
+			resp.Diagnostics.AddError("Can't find the `sudo` executable.",
+				fmt.Sprintf("Can't find the `sudo` executable, got error: %v", err))
+		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		zaConf.Sudo = sudo
+
+		// TODO: Might want to add here a symlink resolv step.
+	}
+
 	q, err := exec.LookPath("qemu-system-x86_64")
 	if err != nil {
 		resp.Diagnostics.AddError("Can't find the `qemu-system-x86_64` executable.",
@@ -208,8 +235,8 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	st, err := exec.LookPath("swtpm")
 	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `swtpm` executable.",
-			fmt.Sprintf("Can't find the `swtpm` executable, got error: %v", err))
+		resp.Diagnostics.AddWarning("Can't find the `swtpm` executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the SwTPM resource. Can't find `swtpm`, got error: %v", err))
 	}
 	if resp.Diagnostics.HasError() {
 		return
@@ -236,6 +263,26 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	}
 	zaConf.Bash = bash
 
+	ip, err := exec.LookPath("ip")
+	if err != nil {
+		resp.Diagnostics.AddError("Can't find `ip`.",
+			fmt.Sprintf("Can't find `ip`, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.IP = ip
+
+	gencmd, err := exec.LookPath("genisoimage")
+	if err != nil {
+		resp.Diagnostics.AddWarning("Can't find the `genisoimage` (part of the cdrkit package) executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the Cloud Init ISO resource. Can't find `genisoimage`, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.GenISOImage = gencmd
+
 	// Make the provider config available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = &zaConf
@@ -252,6 +299,8 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewEdgeNode,
 		NewSwTPM,
 		NewCloudInitISO,
+		NewBridge,
+		NewTAP,
 	}
 }
 

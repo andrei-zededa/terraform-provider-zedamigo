@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
@@ -119,8 +118,19 @@ func (r *CloudInitISO) Configure(ctx context.Context, req resource.ConfigureRequ
 			"Unexpected Resource Configure Type",
 			fmt.Sprintf("Expected string, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 
-		return
+	if len(conf.GenISOImage) == 0 {
+		resp.Diagnostics.AddError(
+			"Missing `genisoimage` command (required for the Cloud Init ISO resource).",
+			fmt.Sprintf("The `genisoimage` command is required for the Cloud Init ISO resource. It is part of the `cdrkit` package, please install it."),
+		)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	r.providerConf = conf
@@ -131,15 +141,6 @@ func (r *CloudInitISO) Create(ctx context.Context, req resource.CreateRequest, r
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	gencmd, err := exec.LookPath("genisoimage")
-	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `genisoimage` (part of the cdrkit package) executable.",
-			fmt.Sprintf("Can't find the `genisoimage` executable, got error: %v", err))
-	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -183,7 +184,8 @@ func (r *CloudInitISO) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	i := fmt.Sprintf("%s.iso", filepath.Join(d, data.Name.ValueString()))
-	res, err := cmd.Run(d, gencmd, "-output", i, "-volid", "cidata", "-joliet", "-rock",
+	res, err := cmd.Run(d, r.providerConf.GenISOImage, "-output", i,
+		"-volid", "cidata", "-joliet", "-rock",
 		filepath.Join(d, "cloud-init", "user-data"),
 		filepath.Join(d, "cloud-init", "meta-data"),
 		filepath.Join(d, "cloud-init", "network-config"))
