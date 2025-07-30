@@ -76,22 +76,22 @@ func (r *EdgeNode) Metadata(ctx context.Context, req resource.MetadataRequest, r
 
 func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Edge Node",
+		Description: "Edge Node / VM",
 		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Edge Node",
+		MarkdownDescription: "Edge Node / VM in the general case",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				Description:         "Edge Node identifier",
-				MarkdownDescription: "Edge Node identifier",
+				Description:         "Edge Node (or VM) identifier",
+				MarkdownDescription: "Edge Node (or VM) identifier",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
-				Description:         "Edge Node name",
-				MarkdownDescription: "Edge Node name",
+				Description:         "Edge Node (or VM) name",
+				MarkdownDescription: "Edge Node (or VM) name",
 				Optional:            true,
 				Required:            false,
 			},
@@ -108,8 +108,8 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Required:            false,
 			},
 			"serial_no": schema.StringAttribute{
-				Description:         "Edge Node serial number",
-				MarkdownDescription: "Edge Node serial number",
+				Description:         "Edge Node (or VM) serial number",
+				MarkdownDescription: "Edge Node (or VM) serial number",
 				Optional:            false,
 				Required:            true,
 			},
@@ -539,4 +539,30 @@ func (r *EdgeNode) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 
 func (r *EdgeNode) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// Alias resource types.
+
+type VMResource struct {
+	EdgeNode // Embed the shared implementation.
+}
+
+func (r VMResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_vm"
+}
+
+func NewVM() resource.Resource {
+	return &VMResource{}
+}
+
+type VirtualMachineResource struct {
+	EdgeNode // Embed the shared implementation.
+}
+
+func (r VirtualMachineResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_virtual_machine"
+}
+
+func NewVirtualMachine() resource.Resource {
+	return &VirtualMachineResource{}
 }

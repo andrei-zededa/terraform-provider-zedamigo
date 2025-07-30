@@ -297,6 +297,8 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewEveInstaller,
 		NewInstalledNode,
 		NewEdgeNode,
+		NewVM,
+		NewVirtualMachine,
 		NewSwTPM,
 		NewCloudInitISO,
 		NewBridge,
