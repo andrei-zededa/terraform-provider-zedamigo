@@ -50,13 +50,16 @@ type EdgeNodeModel struct {
 	Mem              types.String `tfsdk:"mem"`
 	CPUs             types.String `tfsdk:"cpus"`
 	SerialNo         types.String `tfsdk:"serial_no"`
+	Nic0             types.String `tfsdk:"nic0"`
 	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
 	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
+	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
 	DiskSizeMB       types.Int64  `tfsdk:"disk_size_mb"`
 	DriveIf          types.String `tfsdk:"drive_if"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
+	Disk1Img         types.String `tfsdk:"disk_1_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVarsSrc      types.String `tfsdk:"ovmf_vars_src"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
@@ -113,6 +116,12 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:            false,
 				Required:            true,
 			},
+			"nic0": schema.StringAttribute{
+				Description:         "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `user,id=usernet0,hostfwd=tcp::${vm_ssh_port}-:22,model=virtio`",
+				MarkdownDescription: "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `user,id=usernet0,hostfwd=tcp::${vm_ssh_port}-:22,model=virtio`",
+				Optional:            true,
+				Required:            false,
+			},
 			"serial_port_server": schema.BoolAttribute{
 				Description:         "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
 				MarkdownDescription: "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
@@ -135,6 +144,12 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:            false,
 				Required:            true,
 			},
+			"disk_1_image_base": schema.StringAttribute{
+				Description:         "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				MarkdownDescription: "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				Optional:            true,
+				Required:            false,
+			},
 			"disk_size_mb": schema.Int64Attribute{
 				Description:         "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
 				MarkdownDescription: "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
@@ -156,6 +171,11 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 			"disk_image": schema.StringAttribute{
 				Description:         "Edge Node disk image",
 				MarkdownDescription: "Edge Node disk image",
+				Computed:            true,
+			},
+			"disk_1_image": schema.StringAttribute{
+				Description:         "Edge Node 2nd disk disk image",
+				MarkdownDescription: "Edge Node 2nd disk disk image",
 				Computed:            true,
 			},
 			"ovmf_vars_src": schema.StringAttribute{
@@ -263,6 +283,25 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		resp.Diagnostics.Append(res.Diagnostics()...)
 		return
 	}
+	data.Disk1Img = types.StringValue("")
+	if !data.Disk1ImgBase.IsNull() && len(data.Disk1ImgBase.ValueString()) > 0 {
+		data.Disk1Img = types.StringValue(filepath.Join(d, "disk1.disk_img.qcow2"))
+		qemuImgArgs := []string{
+			"create", "-f", "qcow2",
+			"-b", data.Disk1ImgBase.ValueString(), "-F", "qcow2",
+			data.Disk1Img.ValueString(),
+		}
+		if !data.DiskSizeMB.IsNull() {
+			qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%sM", data.DiskSizeMB.String()))
+		}
+		res, err := cmd.Run(d, r.providerConf.QemuImg, qemuImgArgs...)
+		if err != nil {
+			resp.Diagnostics.AddError("Edge Node Resource Error",
+				"Unable to create a new disk image")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	}
 
 	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
 	ovSrc := ovmfVars
@@ -302,23 +341,40 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-m", mem,
 		"-cpu", "host", "-smp", cpus,
 		"-device", "intel-iommu,intremap=on",
-		"-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
-		"-nic", fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32()),
+		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
+		// "-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
 		"-qmp", data.QmpSocket.ValueString(),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
 
+	nic0 := fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32())
+	if !data.Nic0.IsNull() && len(data.Nic0.ValueString()) > 0 {
+		nic0 = data.Nic0.ValueString()
+	}
+	qemuArgs = append(qemuArgs, []string{"-nic", nic0}...)
+
 	if !data.DriveIf.IsNull() {
 		qemuArgs = append(qemuArgs, []string{
 			"-drive", fmt.Sprintf("file=%s,format=qcow2,if=%s",
 				data.DiskImg.ValueString(), data.DriveIf.ValueString()),
 		}...)
+		if len(data.Disk1Img.ValueString()) > 0 {
+			qemuArgs = append(qemuArgs, []string{
+				"-drive", fmt.Sprintf("file=%s,format=qcow2,if=%s",
+					data.Disk1Img.ValueString(), data.DriveIf.ValueString()),
+			}...)
+		}
 	} else {
 		qemuArgs = append(qemuArgs, []string{
 			"-drive", fmt.Sprintf("file=%s,format=qcow2", data.DiskImg.ValueString()),
 		}...)
+		if len(data.Disk1Img.ValueString()) > 0 {
+			qemuArgs = append(qemuArgs, []string{
+				"-drive", fmt.Sprintf("file=%s,format=qcow2", data.Disk1Img.ValueString()),
+			}...)
+		}
 	}
 
 	swtpmSock := data.SwTPMSock.ValueString()

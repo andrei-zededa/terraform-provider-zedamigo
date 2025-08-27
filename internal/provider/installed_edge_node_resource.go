@@ -48,8 +48,10 @@ type InstalledNodeModel struct {
 	SerialNo         types.String `tfsdk:"serial_no"`
 	InstallerISO     types.String `tfsdk:"installer_iso"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
+	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
+	Disk1Img         types.String `tfsdk:"disk_1_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
 	Success          types.Bool   `tfsdk:"success"`
@@ -102,6 +104,12 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            false,
 				Required:            true,
 			},
+			"disk_1_image_base": schema.StringAttribute{
+				Description:         "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				MarkdownDescription: "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				Optional:            true,
+				Required:            false,
+			},
 			"swtpm_socket": schema.StringAttribute{
 				Description:         "swtpm process unix socket",
 				MarkdownDescription: "swtpm process unix socket",
@@ -111,6 +119,11 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"disk_image": schema.StringAttribute{
 				Description:         "Installed Edge Node disk image",
 				MarkdownDescription: "Installed Edge Node disk image",
+				Computed:            true,
+			},
+			"disk_1_image": schema.StringAttribute{
+				Description:         "Installed Edge Node 2nd disk disk image",
+				MarkdownDescription: "Installed Edge Node 2nd disk disk image",
 				Computed:            true,
 			},
 			"serial_console_log": schema.StringAttribute{
@@ -191,6 +204,19 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.Append(res.Diagnostics()...)
 		return
 	}
+	i2nd := ""
+	data.Disk1Img = types.StringValue("")
+	if !data.Disk1ImgBase.IsNull() && len(data.Disk1ImgBase.ValueString()) > 0 {
+		i2nd = filepath.Join(d, "disk1.disk_img.qcow2")
+		res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2",
+			"-b", data.Disk1ImgBase.ValueString(), "-F", "qcow2", i2nd)
+		if err != nil {
+			resp.Diagnostics.AddError("Installed Edge Node Resource Error",
+				"Unable to create a new disk image")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	}
 
 	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
 	if _, err := cmd.CopyFile(ovmfVars, varsFile); err != nil {
@@ -214,12 +240,19 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		"-m", "4096",
 		"-cpu", "host", "-smp", "4,cores=2",
 		"-device", "intel-iommu,intremap=on",
-		"-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
+		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		"-net", "user", "-net", "nic,model=virtio",
 		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
-		"-drive", fmt.Sprintf("file=%s,format=qcow2", i),
+	}...)
+
+	disks := []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i)}
+	if len(i2nd) > 0 {
+		disks = append(disks, []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i2nd)}...)
+	}
+	qemuArgs = append(qemuArgs, disks...)
+	qemuArgs = append(qemuArgs, []string{
 		"-cdrom", data.InstallerISO.ValueString(),
 		"-boot", "once=d",
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
@@ -260,6 +293,15 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 	data.DiskImg = types.StringValue(j.Filename)
+	if len(i2nd) > 0 {
+		j, err := readDiskImage(r.providerConf, d, "disk1")
+		if err != nil {
+			resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
+				fmt.Sprintf("Can't read back installed edge node disk: %v", err))
+			return
+		}
+		data.Disk1Img = types.StringValue(j.Filename)
+	}
 
 	success, err := readInstalledNode(r.providerConf, d)
 	if err != nil {

@@ -48,6 +48,8 @@ type EveInstallerModel struct {
 	ObjCA    types.String `tfsdk:"object_signing_ca"`
 	Hosts    types.String `tfsdk:"additional_hosts"`
 	SSHKey   types.String `tfsdk:"authorized_keys"`
+	GrubCfg  types.String `tfsdk:"grub_cfg"`
+	DPCOver  types.String `tfsdk:"device_port_config_override"`
 	Filename types.String `tfsdk:"filename"`
 }
 
@@ -113,6 +115,18 @@ func (r *EveInstaller) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"authorized_keys": schema.StringAttribute{
 				Description:         "SSH public key (unsure if multiple are supported) that is configured on the installed edge-node for SSH prior to onboarding",
 				MarkdownDescription: "SSH public key (unsure if multiple are supported) that is configured on the installed edge-node for SSH prior to onboarding",
+				Optional:            true,
+				Required:            false,
+			},
+			"grub_cfg": schema.StringAttribute{
+				Description:         "grub.cfg",
+				MarkdownDescription: "grub.cfg",
+				Optional:            true,
+				Required:            false,
+			},
+			"device_port_config_override": schema.StringAttribute{
+				Description:         "DevicePortConfig/override.json",
+				MarkdownDescription: "DevicePortConfig/override.json",
 				Optional:            true,
 				Required:            false,
 			},
@@ -217,6 +231,31 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 		if err := os.WriteFile(filepath.Join(d, "config", "authorized_keys"), b, 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/authorized_keys file: %s", err))
+			return
+		}
+	}
+	grubCfg := data.GrubCfg.ValueString()
+	if len(grubCfg) > 0 {
+		// Ensure that the result file has at least one newline.
+		b := []byte(grubCfg + "\n")
+		if err := os.WriteFile(filepath.Join(d, "config", "grub.cfg"), b, 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/grub.cfg file: %s", err))
+			return
+		}
+	}
+	dpcOver := data.DPCOver.ValueString()
+	if len(dpcOver) > 0 {
+		if err := os.MkdirAll(filepath.Join(d, "config", "DevicePortConfig"), 0o700); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Unable to create resource specific directory: %s", err))
+			return
+		}
+		// Ensure that the result file has at least one newline.
+		b := []byte(dpcOver + "\n")
+		if err := os.WriteFile(filepath.Join(d, "config", "DevicePortConfig", "override.json"), b, 0o600); err != nil {
+			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
+				fmt.Sprintf("Can't write /config/DevicePortConfig/override.json file: %s", err))
 			return
 		}
 	}
