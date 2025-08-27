@@ -22,8 +22,6 @@ import (
 
 const (
 	installedNodesDir = "installed_nodes"
-	ovmfCode          = "/nix/store/7a68vhgrwhp3i6lppv570111jmsb2mn2-OVMF-202402-fd/FV/OVMF_CODE.fd"
-	ovmfVars          = "/nix/store/7a68vhgrwhp3i6lppv570111jmsb2mn2-OVMF-202402-fd/FV/OVMF_VARS.fd"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -219,7 +217,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
-	if _, err := cmd.CopyFile(ovmfVars, varsFile); err != nil {
+	if _, err := cmd.CopyFile(r.providerConf.BaseOVMFVars, varsFile); err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
 			fmt.Sprintf("Unable to copy UEFI OVMF vars: %s", err))
 	}
@@ -243,7 +241,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		"-net", "user", "-net", "nic,model=virtio",
 		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
-		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
+		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
 	}...)
 

@@ -304,7 +304,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 
 	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
-	ovSrc := ovmfVars
+	ovSrc := r.providerConf.BaseOVMFVars
 	if !data.OvmfVarsSrc.IsNull() {
 		ovSrc = data.OvmfVarsSrc.ValueString()
 	}
@@ -343,7 +343,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-device", "intel-iommu,intremap=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		// "-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
-		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", ovmfCode),
+		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
 		"-qmp", data.QmpSocket.ValueString(),
 		"-pidfile", filepath.Join(d, "qemu.pid"),

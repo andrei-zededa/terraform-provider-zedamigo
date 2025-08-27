@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,12 @@ const (
 	DefaultZedAmigoLibPath = "zedamigo"
 )
 
+// Embed OVMF files.
+//
+//go:embed embedded_ovmf/OVMF_CODE.fd
+//go:embed embedded_ovmf/OVMF_VARS.fd
+var embeddedOVMF embed.FS
+
 // Ensure ZedAmigoProvider satisfies various provider interfaces.
 var (
 	_ provider.Provider = &ZedAmigoProvider{}
@@ -40,17 +47,19 @@ var (
 // the exact paths of various commands(executables) that are needed by the various
 // resources of the provider.
 type ZedAmigoProviderConfig struct {
-	Target      string
-	LibPath     string
-	UseSudo     bool
-	Sudo        string
-	Qemu        string
-	QemuImg     string
-	Docker      string
-	Swtpm       string
-	Bash        string
-	GenISOImage string
-	IP          string
+	Target       string
+	LibPath      string
+	BaseOVMFCode string
+	BaseOVMFVars string
+	UseSudo      bool
+	Sudo         string
+	Qemu         string
+	QemuImg      string
+	Docker       string
+	Swtpm        string
+	Bash         string
+	GenISOImage  string
+	IP           string
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -188,6 +197,32 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 
+	if err := os.MkdirAll(filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("lib_path"),
+			fmt.Sprintf("%s", err),
+			fmt.Sprintf("Failed to create ZedAmigo lib_path/embedded_ovmf directory: %v", err),
+		)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	for _, f := range []string{"embedded_ovmf/OVMF_CODE.fd", "embedded_ovmf/OVMF_VARS.fd"} {
+		if err := extractFileIfNotExists(f, filepath.Join(zaConf.LibPath, f)); err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("lib_path"),
+				fmt.Sprintf("%s", err),
+				fmt.Sprintf("Failed to extract OVMF file '%s': %v", f, err),
+			)
+		}
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.BaseOVMFCode = "embedded_ovmf/OVMF_CODE.fd"
+	zaConf.BaseOVMFVars = "embedded_ovmf/OVMF_VARS.fd"
+
 	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
 		zaConf.UseSudo = true
 		sudo, err := exec.LookPath("sudo")
@@ -319,4 +354,29 @@ func New(version string) func() provider.Provider {
 			version: version,
 		}
 	}
+}
+
+// extractFileIfNotExists checks if a file exists at targetPath, and if not,
+// extracts it from the embedded filesystem.
+func extractFileIfNotExists(embeddedPath, targetPath string) error {
+	// Check if file already exists
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error checking if file exists: %w", err)
+	}
+
+	// File doesn't exist, so extract it.
+	// Read the embedded file.
+	data, err := embeddedOVMF.ReadFile(embeddedPath)
+	if err != nil {
+		return fmt.Errorf("error reading embedded file %s: %w", embeddedPath, err)
+	}
+
+	// Write the file to the target path.
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return fmt.Errorf("error writing file to %s: %w", targetPath, err)
+	}
+
+	return nil
 }
