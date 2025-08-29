@@ -208,7 +208,7 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	for _, f := range []string{"embedded_ovmf/OVMF_CODE.fd", "embedded_ovmf/OVMF_VARS.fd"} {
+	for _, f := range []string{filepath.Join("embedded_ovmf", "OVMF_CODE.fd"), filepath.Join("embedded_ovmf", "OVMF_VARS.fd")} {
 		if err := extractFileIfNotExists(f, filepath.Join(zaConf.LibPath, f)); err != nil {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("lib_path"),
@@ -220,8 +220,8 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	zaConf.BaseOVMFCode = "embedded_ovmf/OVMF_CODE.fd"
-	zaConf.BaseOVMFVars = "embedded_ovmf/OVMF_VARS.fd"
+	zaConf.BaseOVMFCode = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_CODE.fd")
+	zaConf.BaseOVMFVars = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_VARS.fd")
 
 	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
 		zaConf.UseSudo = true
