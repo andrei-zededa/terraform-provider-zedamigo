@@ -16,4 +16,9 @@ provider "zedamigo" {
   # created on `target`. Optional and if not specified it defaults to
   # `$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`.
   # lib_path = ""
+
+  # Use `sudo` for running specific (but not all) commands that need to
+  # be executed as the root user. Optional and if not specified it defaults
+  # to `false`.
+  # use_sudo = false
 }

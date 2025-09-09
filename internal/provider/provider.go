@@ -19,6 +19,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/adrg/xdg"
+
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 )
 
 const (
@@ -95,19 +97,28 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"target": schema.StringAttribute{
-				Description:         "Target host on which to execute commands",
-				MarkdownDescription: "Target host on which to execute commands",
-				Optional:            true,
+				Description: "Target host on which to create resources, execute commands.",
+				MarkdownDescription: undent.Md(`
+				Target host on which the zedamigo provider will execute commands and
+				create resources. ONLY |localhost| is currently supported. Optional and
+				if not specified it defaults to |localhost|.`),
+				Optional: true,
 			},
 			"lib_path": schema.StringAttribute{
-				Description:         "The provider lib directory, where all disk images and other files are created on `target`. Default: `XDG_STATE_HOME/zedamigo`.",
-				MarkdownDescription: "The provider lib directory, where all disk images and other files are created on `target`. Default: `XDG_STATE_HOME/zedamigo`.",
-				Optional:            true,
+				Description: "Provider lib directory, where all files are created on `target`. Default: `XDG_STATE_HOME/zedamigo`.",
+				MarkdownDescription: undent.Md(`
+				The provider lib directory, where all disk images and other files are
+				created on |target|. Optional and if not specified it defaults to
+				|$XDG_STATE_HOME/zedamigo/|, e.g. |$HOME/.local/state/zedamigo/|.`),
+				Optional: true,
 			},
 			"use_sudo": schema.BoolAttribute{
-				Description:         "Use `sudo` for running specific commands that need to be executed as the root user.",
-				MarkdownDescription: "Use `sudo` for running specific commands that need to be executed as the root user.",
-				Optional:            true,
+				Description: "Use `sudo` for running specific commands that need to be executed as the root user.",
+				MarkdownDescription: undent.Md(`
+				Use |sudo| for running specific (but not all) commands that need to
+				be executed as the root user. Optional and if not specified it defaults
+				to |false|.`),
+				Optional: true,
 			},
 		},
 	}
