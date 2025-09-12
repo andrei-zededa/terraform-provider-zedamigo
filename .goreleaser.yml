@@ -46,8 +46,3 @@ release:
   github:
     owner: andrei-zededa 
     name: terraform-provider-zedamigo
-
-changelog:
-  # This is the changelog included in the release description, not a separate
-  # file.
-  skip: false
