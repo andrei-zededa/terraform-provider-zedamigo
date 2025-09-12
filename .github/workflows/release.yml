@@ -3,7 +3,15 @@ name: release
 on:
   push:
     tags:
-      - "v*.*.*" # Trigger on version tags
+      - "v*.*.*" # Trigger on version tags.
+  # Manual trigger with specific container image tag.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'CURRENTLY IGNORED ? - Set the version of the triggered build'
+        required: true
+        default: 'latest'
+        type: string
 
 permissions:
   contents: write

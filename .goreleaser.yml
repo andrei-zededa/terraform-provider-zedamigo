@@ -1,3 +1,5 @@
+version: 2
+
 project_name: terraform-provider-zedamigo
 
 builds:
@@ -46,4 +48,6 @@ release:
     name: terraform-provider-zedamigo
 
 changelog:
-  skip: true
+  # This is the changelog included in the release description, not a separate
+  # file.
+  skip: false
