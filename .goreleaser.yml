@@ -3,11 +3,11 @@ version: 2
 project_name: terraform-provider-zedamigo
 
 builds:
-  - env:
-      - CGO_ENABLED=0
   - id: terraform-provider-zedamigo
     main: ./main.go
     binary: "{{ .ProjectName }}_v{{ .Version }}"
+    env:
+      - CGO_ENABLED=0
     flags:
       - -trimpath
       - -tags 'osusergo netgo'
@@ -19,14 +19,14 @@ builds:
       - amd64
 
 archives:
-  # Standard Terraform-style ZIP archives
+  # Standard Terraform-style ZIP archives.
   - id: terraform-archives
     builds:
       - terraform-provider-zedamigo
     format: zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
-  # Raw binaries (one per OS/arch)
+  # Raw binaries (one per OS/arch).
   - id: standalone-binaries
     builds:
       - terraform-provider-zedamigo
