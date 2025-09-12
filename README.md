@@ -48,6 +48,7 @@ uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip
 ### Install OpenTofu
 ```
 curl -fsSL https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1.10.6_linux_amd64.tar.gz -o tofu_1.10.6_linux_amd64.tar.gz  \
+    && mkdir tofu_1.10.6_linux_amd64/                                                                                                       \
     && tar -xzvf tofu_1.10.6_linux_amd64.tar.gz -C tofu_1.10.6_linux_amd64/                                                                 \
     && mkdir -p ~/bin/                                                                                                                      \
     && mv tofu_1.10.6_linux_amd64/tofu ~/bin/                                                                                               \
