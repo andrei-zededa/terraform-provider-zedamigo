@@ -7,12 +7,14 @@ builds:
     main: ./main.go
     binary: "{{ .ProjectName }}_v{{ .Version }}"
     env:
+      - GOTOOLCHAIN=local
       - CGO_ENABLED=0
     flags:
       - -trimpath
-      - -tags 'osusergo netgo'
+      - -tags
+      - 'osusergo netgo'
     ldflags:
-      - "-s -w -X main.version={{.Version}}"
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.buildDate={{ .CommitDate }} -X main.builtBy=goreleaser -X main.treeState={{ .IsGitDirty }}
     goos:
       - linux
     goarch:

@@ -19,13 +19,17 @@ import (
 )
 
 var (
-	version = "dev" // version string of the provider, should be set at build time.
-	commit  = ""    // commit id, should be set at build time.
-	date    = ""    // date is the build date.
+	version   = "dev" // version string of the provider, should be set at build time.
+	commit    = ""    // commit id, should be set at build time.
+	buildDate = ""
+	builtBy   = ""
+	treeState = ""
 )
 
 var (
 	debug = flag.Bool("debug", false, "Set to true to run the provider with support for debuggers like delve")
+
+	showVersion = flag.Bool("version", false, "Show the provider version")
 
 	socketTailer = flag.Bool("socket-tailer", false, "Run the binary in 'socket tailer' mode")
 
@@ -36,6 +40,13 @@ var (
 
 func main() {
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Fprintf(os.Stderr, "terraform-provider-zedamigo version '%s' (commit '%s', build date '%s', built by '%s', git tree state '%s').\n\n",
+			version, commit, buildDate, builtBy, treeState)
+		flag.Usage()
+		os.Exit(0)
+	}
 
 	if *socketTailer {
 		// Run in "socket tailer" mode and NOT the normal terraform provider mode.
