@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     zedamigo = {
-      source = "andrei-zededa/zedamigo"
+      source = "localhost/andrei-zededa/zedamigo"
     }
 
     random = {

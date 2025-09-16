@@ -321,7 +321,7 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	gencmd, err := exec.LookPath("genisoimage")
 	if err != nil {
-		resp.Diagnostics.AddWarning("Can't find the `genisoimage` executable (part of the cdrkit package).",
+		resp.Diagnostics.AddWarning("Can't find the `genisoimage` executable (part of the `cdrkit` package or the `genisoimage` package).",
 			fmt.Sprintf("This warning can be ignored if you DO NOT use the Cloud Init ISO resource. Can't find `genisoimage`, got error: %v", err))
 	}
 	if resp.Diagnostics.HasError() {

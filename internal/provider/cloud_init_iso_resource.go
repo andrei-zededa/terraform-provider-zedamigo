@@ -61,8 +61,8 @@ func (r *CloudInitISO) Schema(ctx context.Context, req resource.SchemaRequest, r
 		Description: "Cloud Init ISO",
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "Create a Cloud Init ISO (with user-data, meta-data and network-config)" +
-			" that can be attached to a VM. Requires `genisoimage` (part of the cdrkit package)" +
-			" to be installed.",
+			" that can be attached to a VM. Requires `genisoimage` (part of the `cdrkit` package" +
+			" or the `genisoimage` package) to be installed.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -126,7 +126,7 @@ func (r *CloudInitISO) Configure(ctx context.Context, req resource.ConfigureRequ
 	if len(conf.GenISOImage) == 0 {
 		resp.Diagnostics.AddError(
 			"Missing `genisoimage` command (required for the Cloud Init ISO resource).",
-			fmt.Sprintf("The `genisoimage` command is required for the Cloud Init ISO resource. It is part of the `cdrkit` package, please install it."),
+			fmt.Sprintf("The `genisoimage` command is required for the Cloud Init ISO resource. It is part of the `cdrkit` package or the `genisoimage` package, please install it."),
 		)
 		if resp.Diagnostics.HasError() {
 			return

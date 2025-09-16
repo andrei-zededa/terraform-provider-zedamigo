@@ -28,7 +28,7 @@ resource "zedamigo_vm" "CONTROL_PLANE_01" {
   mem                = "2G"
   serial_no          = local.control_plane.serial
   serial_port_server = true
-  disk_image_base    = var.disk_image_base
+  disk_image_base    = abspath(var.disk_image_base)
   disk_size_mb       = "100000" # ~ 100GB
   drive_if           = "virtio" # Required because the Debian `genericcloud` image doesn't have any drivers for IDE/SATA disks.
 
@@ -46,7 +46,7 @@ resource "zedamigo_vm" "NODES" {
   mem                = "1G"
   serial_no          = each.value.serial
   serial_port_server = true
-  disk_image_base    = var.disk_image_base
+  disk_image_base    = abspath(var.disk_image_base)
   disk_size_mb       = "100000" # ~ 100GB
   drive_if           = "virtio" # Required because the Debian `genericcloud` image doesn't have any drivers for IDE/SATA disks.
 
