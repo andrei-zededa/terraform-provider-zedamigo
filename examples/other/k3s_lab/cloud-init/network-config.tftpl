@@ -1,0 +1,28 @@
+version: 2
+ethernets:
+  # Configure a specific interface. NOTE: Although netplan interface matches
+  # work in a "more specific wins" kind of way" the generated networkd config
+  # files will be processed in lexicographic order.
+  100-specific-eth:
+   dhcp4: false
+   dhcp6: false
+   addresses: [${ipv4_addr}]
+   match:
+     macaddress: "${mac}"
+   set-name: k3s-lab-net
+
+  # Configure all remaining ethernet network interfaces.
+  200-all-eth:
+    match:
+      name: eth*
+    dhcp4: true
+    dhcp6: true
+
+  300-all-en:
+    match:
+      name: en*
+    dhcp4: true
+    dhcp6: true
+
+# Apply configuration immediately
+renderer: networkd
