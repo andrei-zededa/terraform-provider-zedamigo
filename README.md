@@ -130,7 +130,7 @@ uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip
 
 ### Install Docker
 ```
-❯ sudo install -m 0755 -d /etc/apt/keyrings                                                                           \
+❯ sudo install -m 0755 -d /etc/apt/keyrings                                                                         \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o - | sudo tee /etc/apt/keyrings/docker.asc         \
     && sudo chmod a+r /etc/apt/keyrings/docker.asc                                                                  \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -160,10 +160,16 @@ curl -fsSL https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1
 ```
 
 ### Install the zedamigo terraform provider locally
+
+> NOTE: There are several methods of using a terraform provider which is not
+> published to a provider registry (https://registry.terraform.io/ or https://search.opentofu.org/).
+> Here we rely on the fact that both `terraform` and `opentofu` will look for
+> provider releases in the `~/.terraform.d` local directory first. However if
+> you have any specific configuration (for example dev overrides in `~/.config/opentofu/tofurc`
+or `~/.terraformrc`) then this might fail.
+
 ```
-mkdir -p ~/.terraform.d/plugins/localhost/andrei-zededa/zedamigo/;
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.0/terraform-provider-zedamigo_0.5.0_linux_amd64.zip  \
-    -o ~/.terraform.d/plugins/localhost/andrei-zededa/zedamigo/terraform-provider-zedamigo_0.5.0_linux_amd64.zip;
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.1/install.sh | sh -s
 ```
 
 ## Troubleshooting

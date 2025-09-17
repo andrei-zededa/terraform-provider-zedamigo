@@ -45,3 +45,5 @@ release:
   github:
     owner: andrei-zededa 
     name: terraform-provider-zedamigo
+  extra_files:
+    - glob: ./install.sh
