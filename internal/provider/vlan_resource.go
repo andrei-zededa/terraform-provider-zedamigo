@@ -26,97 +26,89 @@ import (
 )
 
 const (
-	tapIntfsDir = "tap_intfs"
+	vlanIntfsDir = "vlan_sub_intfs"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
-	_ resource.Resource                = &TAP{}
-	_ resource.ResourceWithImportState = &TAP{}
+	_ resource.Resource                = &VLAN{}
+	_ resource.ResourceWithImportState = &VLAN{}
 )
 
-func NewTAP() resource.Resource {
-	return &TAP{}
+func NewVLAN() resource.Resource {
+	return &VLAN{}
 }
 
-// TAP defines the resource implementation.
-type TAP struct {
+// VLAN defines the resource implementation.
+type VLAN struct {
 	providerConf *ZedAmigoProviderConfig
 }
 
-// TAPModel describes the resource data model.
-type TAPModel struct {
+// VLANModel describes the resource data model.
+type VLANModel struct {
 	ID          types.String `tfsdk:"id"`
+	VlanID      types.Int64  `tfsdk:"vlan_id"`
 	Name        types.String `tfsdk:"name"`
 	MTU         types.Int64  `tfsdk:"mtu"`
 	State       types.String `tfsdk:"state"`
-	Owner       types.String `tfsdk:"owner"`
-	Group       types.String `tfsdk:"group"`
-	Master      types.String `tfsdk:"master"` // Bridge name to attach to.
+	Parent      types.String `tfsdk:"parent"`
 	IPv4Address types.String `tfsdk:"ipv4_address"`
 }
 
-func (r *TAP) getResourceDir(id string) string {
-	return filepath.Join(r.providerConf.LibPath, tapIntfsDir, id)
+func (r *VLAN) getResourceDir(id string) string {
+	return filepath.Join(r.providerConf.LibPath, vlanIntfsDir, id)
 }
 
-func (r *TAP) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_tap"
+func (r *VLAN) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_vlan"
 }
 
-func (r *TAP) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *VLAN) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "TAP interface",
-		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Create and manage a Linux network TAP interface using iproute2 commands.",
+		Description:         "VLAN sub-interface",
+		MarkdownDescription: "Create and manage a Linux network VLAN sub-interface on a specific parent interface. This is done using iproute2 commands.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				Description:         "TAP identifier",
-				MarkdownDescription: "TAP identifier",
+				Description:         "VLAN resource identifier",
+				MarkdownDescription: "VLAN resource identifier. This is not the VLAN ID, since we can have multiple sub-interfaces with the same VLAN ID on different parent interfaces.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"name": schema.StringAttribute{
-				Description: "Name of the TAP interface",
+			"vlan_id": schema.Int64Attribute{
+				Description: "VLAN ID for this sub-interface",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+			},
+			"name": schema.StringAttribute{
+				Computed:    true,
+				Description: "Full name of the resuling interface (e.g. `${parent}.${vlanid}`).",
 			},
 			"mtu": schema.Int64Attribute{
-				Description: "MTU size for the TAP interface",
+				Description: "MTU size for the VLAN sub-interface",
 				Optional:    true,
 				Computed:    true,
 			},
 			"state": schema.StringAttribute{
-				Description: "State of the TAP interface (up/down)",
+				Description: "State of the VLAN sub-interface (up/down)",
 				Optional:    true,
 				Computed:    true,
 			},
-			"owner": schema.StringAttribute{
-				Description: "Owner of the TAP interface",
-				Optional:    true,
-			},
-			"group": schema.StringAttribute{
-				Description: "Group of the TAP interface",
-				Optional:    true,
-			},
-			"master": schema.StringAttribute{
-				Description: "Bridge interface to attach this TAP interface to",
-				Optional:    true,
+			"parent": schema.StringAttribute{
+				Description: "Parent interface on which to create this VLAN sub-interface",
+				Optional:    false,
+				Required:    true,
 			},
 			"ipv4_address": schema.StringAttribute{
-				Description: "IPv4 address to configure on the TAP interface",
+				Description: "IPv4 address to configure on the VLAN sub-interface",
 				Optional:    true,
 			},
 		},
 	}
 }
 
-func (r *TAP) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *VLAN) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	// Prevent panic if the provider has not been configured.
 	if req.ProviderData == nil {
 		return
@@ -135,11 +127,11 @@ func (r *TAP) Configure(ctx context.Context, req resource.ConfigureRequest, resp
 	r.providerConf = conf
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
-	tflog.Trace(ctx, "TAP resource configure debugging", traceData)
+	tflog.Trace(ctx, "VLAN resource configure debugging", traceData)
 }
 
-func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data TAPModel
+func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data VLANModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -149,7 +141,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 
 	u, err := uuid.NewV4()
 	if err != nil {
-		resp.Diagnostics.AddError("TAP Resource Error",
+		resp.Diagnostics.AddError("VLAN Resource Error",
 			fmt.Sprintf("Unable to generate a new UUID: %s", err))
 		return
 	}
@@ -160,17 +152,18 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 
 	d := r.getResourceDir(data.ID.ValueString())
 	if err := os.MkdirAll(d, 0o700); err != nil {
-		resp.Diagnostics.AddError("TAP Resource Error",
+		resp.Diagnostics.AddError("VLAN Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
 	if err := createTFBackPointer(d); err != nil {
-		resp.Diagnostics.AddError("TAP Resource Error",
+		resp.Diagnostics.AddError("VLAN Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
 
-	tapIf := data.Name.ValueString()
+	subIf := fmt.Sprintf("%s.%d", data.Parent.ValueString(), data.VlanID.ValueInt64())
+	data.Name = types.StringValue(subIf)
 
 	ipCmd := r.providerConf.IP
 	ipArgs := []string{}
@@ -179,19 +172,15 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		ipArgs = []string{r.providerConf.IP}
 	}
 
-	// Create the TAP.
-	moreArgs := []string{"tuntap", "add", "dev", tapIf, "mode", "tap"}
-	if !data.Owner.IsNull() && !data.Owner.IsUnknown() {
-		moreArgs = append(moreArgs, "user", data.Owner.ValueString())
-	}
-
-	if !data.Group.IsNull() && !data.Group.IsUnknown() {
-		moreArgs = append(moreArgs, "group", data.Group.ValueString())
+	// Create the VLAN sub-interface, e.g. sudo ip link add link eth100 name eth100.64 type vlan id 64
+	moreArgs := []string{
+		"link", "add", "link", data.Parent.ValueString(), "name", subIf,
+		"type", "vlan", "id", fmt.Sprintf("%d", data.VlanID.ValueInt64()),
 	}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		resp.Diagnostics.AddError("TAP Resource Error",
-			"Unable to create a new TAP.")
+		resp.Diagnostics.AddError("VLAN Resource Error",
+			"Unable to create a new VLAN.")
 		resp.Diagnostics.Append(res.Diagnostics()...)
 		return
 	}
@@ -199,38 +188,24 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	// Set the MTU if specified.
 	if !data.MTU.IsNull() && !data.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", data.MTU.ValueInt64())
-		moreArgs := []string{"link", "set", "dev", tapIf, "mtu", mtu}
+		moreArgs := []string{"link", "set", "dev", subIf, "mtu", mtu}
 		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
-			resp.Diagnostics.AddError("TAP Resource Error",
-				"Unable to create a new TAP.")
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				"Unable to create a new VLAN.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
 		}
 	}
 
-	// Set the master (bridge) if specified.
-	if !data.Master.IsNull() && !data.Master.IsUnknown() {
-		master := data.Master.ValueString()
-		moreArgs := []string{"link", "set", "dev", tapIf, "master", master}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
-		if err != nil {
-			resp.Diagnostics.AddError("TAP Resource Error",
-				"Unable to create a new TAP.")
-			resp.Diagnostics.Append(res.Diagnostics()...)
-			return
-		}
-	}
-
-	// Set the state if specified. NOTE: this MUST be done after setting
-	// the master, if master is specified.
+	// Set the state if specified.
 	if !data.State.IsNull() && !data.State.IsUnknown() {
 		state := data.State.ValueString()
-		moreArgs := []string{"link", "set", "dev", tapIf, state}
+		moreArgs := []string{"link", "set", "dev", subIf, state}
 		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
-			resp.Diagnostics.AddError("TAP Resource Error",
-				"Unable to create a new TAP.")
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				"Unable to create a new VLAN.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
 		}
@@ -248,32 +223,32 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 			return
 		}
 
-		moreArgs := []string{"addr", "add", addr, "dev", tapIf}
+		moreArgs := []string{"addr", "add", addr, "dev", subIf}
 		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
-			resp.Diagnostics.AddError("TAP Resource Error",
-				"Unable to create a new TAP.")
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				"Unable to create a new VLAN.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
 		}
 
 	}
 
-	// Read the TAP current state.
-	if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
-		resp.Diagnostics.AddError("Failed to read TAP state", err.Error())
+	// Read the VLAN current state.
+	if diags, err := r.readVLAN(d, ipCmd, ipArgs, &data); err != nil {
+		resp.Diagnostics.AddError("Failed to read VLAN state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
 	}
 
-	tflog.Trace(ctx, "TAP Resource created succesfully")
+	tflog.Trace(ctx, "VLAN Resource created succesfully")
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data TAPModel
+func (r *VLAN) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var data VLANModel
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
@@ -290,14 +265,14 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 		ipArgs = []string{r.providerConf.IP}
 	}
 
-	// Read the TAP current state.
-	if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
+	// Read the VLAN current state.
+	if diags, err := r.readVLAN(d, ipCmd, ipArgs, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
 		}
 
-		resp.Diagnostics.AddError("Failed to read TAP state", err.Error())
+		resp.Diagnostics.AddError("Failed to read VLAN state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
 	}
@@ -306,8 +281,8 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *TAP) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data TAPModel
+func (r *VLAN) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data VLANModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -317,11 +292,11 @@ func (r *TAP) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 
 	// TODO: What to do here ?
 
-	resp.Diagnostics.AddError("TAP Resource Update Error", "Update is not supported.")
+	resp.Diagnostics.AddError("VLAN Resource Update Error", "Update is not supported.")
 }
 
-func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var data TAPModel
+func (r *VLAN) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data VLANModel
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
@@ -329,7 +304,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		return
 	}
 
-	tapIf := data.Name.ValueString()
+	subIf := data.Name.ValueString()
 	d := r.getResourceDir(data.ID.ValueString())
 
 	ipCmd := r.providerConf.IP
@@ -339,50 +314,36 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		ipArgs = []string{r.providerConf.IP}
 	}
 
-	// Remove from bridge first if attached.
-	if !data.Master.IsNull() {
-		moreArgs := []string{"link", "set", "dev", tapIf, "nomaster"}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
-		if err != nil {
-			if !strings.Contains(err.Error(), "does not exist") {
-				resp.Diagnostics.AddError("Failed to delete TAP", err.Error())
-				resp.Diagnostics.Append(res.Diagnostics()...)
-				return
-			}
-		}
-
-	}
-
-	// Delete an existing TAP.
-	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap"}
+	// Delete an existing VLAN.
+	moreArgs := []string{"link", "del", subIf}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		if !strings.Contains(err.Error(), "does not exist") {
-			resp.Diagnostics.AddError("Failed to delete TAP", err.Error())
+		if !strings.Contains(err.Error(), "Cannot find device") {
+			resp.Diagnostics.AddError("Failed to delete VLAN", err.Error())
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
 		}
 	}
 
 	if err := os.RemoveAll(d); err != nil {
-		resp.Diagnostics.AddError("TAP Resource Delete Error",
-			fmt.Sprintf("Can't delete TAP resource directory: %v", err))
+		resp.Diagnostics.AddError("VLAN Resource Delete Error",
+			fmt.Sprintf("Can't delete VLAN resource directory: %v", err))
 		return
 	}
 }
 
-func (r *TAP) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *VLAN) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPModel) (diag.Diagnostics, error) {
-	tapIf := model.Name.ValueString()
+func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VLANModel) (diag.Diagnostics, error) {
+	subIf := model.Name.ValueString()
 
-	// Check if TAP exists and get info.
-	moreArgs := []string{"link", "show", tapIf}
+	// Check if VLAN exists and get info.
+	moreArgs := []string{"link", "show", subIf}
 	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		return res.Diagnostics(), fmt.Errorf("can't retrieve TAP '%s' details: %w", tapIf, err)
+		return res.Diagnostics(), fmt.Errorf("can't retrieve VLAN '%s' details: %w", subIf, err)
 	}
 
 	// Parse output for MTU and state.
@@ -393,20 +354,12 @@ func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPM
 		if matches := mtuRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
 			x, err := strconv.ParseInt(matches[1], 10, 64)
 			if err != nil {
-				e := fmt.Errorf("invalid TAP '%s' MTU value '%s': %w", tapIf, matches[1], err)
+				e := fmt.Errorf("invalid VLAN '%s' MTU value '%s': %w", subIf, matches[1], err)
 				d := diag.Diagnostics{}
-				d.AddError("Can't find TAP interface MTU value", e.Error())
+				d.AddError("Can't find VLAN interface MTU value", e.Error())
 				return d, e
 			}
 			model.MTU = types.Int64Value(x)
-		}
-
-		// Check for master (bridge).
-		masterRegex := regexp.MustCompile(`master (\S+)`)
-		if matches := masterRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
-			model.Master = types.StringValue(matches[1])
-		} else {
-			model.Master = types.StringNull()
 		}
 
 		if strings.Contains(lines[0], "UP") {
@@ -416,11 +369,11 @@ func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPM
 		}
 	}
 
-	// Get IP address(es) of TAP.
-	moreArgs = []string{"addr", "show", tapIf}
+	// Get IP address(es) of VLAN.
+	moreArgs = []string{"addr", "show", subIf}
 	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		return res.Diagnostics(), fmt.Errorf("can't retrieve TAP '%s' addreses: %w", tapIf, err)
+		return res.Diagnostics(), fmt.Errorf("can't retrieve VLAN '%s' addreses: %w", subIf, err)
 	}
 	// Look for IPv4 address in CIDR format: inet 192.168.1.1/24 brd ...
 	addrRegex := regexp.MustCompile(`inet (\d+\.\d+\.\d+\.\d+/\d+)`)
