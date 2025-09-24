@@ -1,8 +1,10 @@
 terraform {
   required_providers {
     zedamigo = {
-      source = "localhost/andrei-zededa/zedamigo"
+      source  = "localhost/andrei-zededa/zedamigo"
+      version = ">= 0.5.0, < 1.0.0"
     }
+
 
     random = {
       source  = "hashicorp/random"
@@ -14,10 +16,6 @@ terraform {
       version = "3.2.4"
     }
 
-    # external = {
-    #   source  = "hashicorp/external"
-    #   version = "2.3.5"
-    # }
   }
 }
 

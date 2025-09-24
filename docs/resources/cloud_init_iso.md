@@ -3,12 +3,12 @@
 page_title: "zedamigo_cloud_init_iso Resource - zedamigo"
 subcategory: ""
 description: |-
-  Create a Cloud Init ISO (with user-data, meta-data and network-config) that can be attached to a VM. Requires genisoimage (part of the cdrkit package) to be installed.
+  Create a Cloud Init ISO (with user-data, meta-data and network-config) that can be attached to a VM. Requires genisoimage (part of the cdrkit package or the genisoimage package) to be installed.
 ---
 
 # zedamigo_cloud_init_iso (Resource)
 
-Create a Cloud Init ISO (with user-data, meta-data and network-config) that can be attached to a VM. Requires `genisoimage` (part of the cdrkit package) to be installed.
+Create a Cloud Init ISO (with user-data, meta-data and network-config) that can be attached to a VM. Requires `genisoimage` (part of the `cdrkit` package or the `genisoimage` package) to be installed.
 
 ## Example Usage
 

@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     zedamigo = {
-      source = "andrei-zededa/zedamigo"
+      source = "localhost/andrei-zededa/zedamigo"
     }
   }
 }
@@ -17,25 +17,8 @@ resource "zedamigo_disk_image" "test" {
   size_mb = 10000
 }
 
-//  resource "zedamigo_disk_image" "test_bbbb" {
-//    name    = "test456"
-//    size_mb = 2048
-//  }
-//  
-//  resource "zedamigo_eve_installer" "eve1330" {
-//    name    = "eve1330"
-//    tag     = "13.3.0-kvm-amd64"
-//    cluster = "zedcloud.gmwtus.zededa.net"
-//  }
-//  
-//  resource "zedamigo_eve_installer" "eve1330_2nd" {
-//    name    = "eve1330"
-//    tag     = "13.3.0-kvm-amd64"
-//    cluster = "zedcloud.hummingbird.zededa.net"
-//  }
-
 data "zedamigo_eve_installer" "eve1440" {
-  filename = "/home/ev-zed1/ZED/git/github.com/andrei-zededa/zededa-cloud-speedrun/14.4.0-kvm-amd64.gmwtus_custom_installer.iso"
+  filename = "/home/user/images/14.4.0-kvm-amd64.gmwtus_custom_installer.iso"
 }
 
 resource "zedamigo_installed_edge_node" "red01_inst" {

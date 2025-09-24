@@ -62,7 +62,16 @@ resource "zedamigo_disk_image" "empty_disk_100G" {
 Create a custom EVE-OS installer ISO using the `zedamigo_eve_installer` resource,
 specific for the Zedcloud cluster that we are using (the same on which the
 [zedcloud terraform provider is configured](https://registry.terraform.io/providers/zededa/zedcloud/latest/docs#zedcloud_url-1)
-to create the Zedcloud objects). This basically automates the [custom EVE-OS eve_installers instructions](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image):
+to create the Zedcloud objects). This basically automates the [custom EVE-OS eve_installers instructions](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image).
+
+> NOTE: Here we use the `var.ZEDEDA_CLOUD_URL` variable, the same one which
+> should be used to configure the zedcloud terraform provider. This MUST be 
+> set to the `zedcloud.*.zededa.net` variant and NOT to the `zedcontrol.*.zededa.net`
+> variant.
+
+Choosing which EVE-OS version will be used is done through the `tag` attribute
+of the `zedamigo_eve_installer` resource. This is the container image tag of
+the [lfedge/eve](https://hub.docker.com/r/lfedge/eve/tags) image from Dockerhub.
 ```hcl
 resource "zedamigo_eve_installer" "eve_os_installer_iso_1451" {
   name            = "EVE-OS_14.5.1-lts-kvm-amd64"
@@ -76,12 +85,19 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1451" {
 }
 ```
 
-Run the EVE-OS installation process which uses the previously created custom
-installer ISO and will create all the partitions on the *empty* disk image.
-This simulates booting a system (server/PC/NUC/etc.) with the installer ISO
-and waiting for the automated EVE-OS installation process to finish. The *device*
+Then using the `zedamigo_installed_edge_node` resource we run the EVE-OS
+installation process which uses the previously created custom installer ISO
+and which will create all the partitions on the *empty* disk image. This
+simulates booting a system (server/PC/NUC/etc.) with the installer ISO and
+waiting for the automated EVE-OS installation process to finish. The *device*
 serial number needs to match the one configured in the Zedcloud edge-node object
-so that the onboarding will work correctly:
+so that the onboarding will work correctly.
+
+> Notice how the different resources are linked together by using their attributes
+> as variables in other resources. In terraform this creates an implicity dependency
+> between 2 resources and terraform knows that it needs to create one resource
+> before the other.
+
 ```hcl
 resource "zedamigo_installed_edge_node" "EN_TEST_01_INSTALLED_EVE" {
   name          = "EN_TEST_01_INSTALLED_EVE"
@@ -91,10 +107,10 @@ resource "zedamigo_installed_edge_node" "EN_TEST_01_INSTALLED_EVE" {
 }
 ```
 
-Start the VM that will run the installed EVE-OS instance, it will have by default
-a single NIC with an embedded QEMU DHCP server and internet access therefore
-EVE-OS will be able to connect to Zedcloud and the edge-node should be successfully
-onboarded and `ONLINE` in Zedcloud:
+Using the `zedamigo_edge_node` resource start the VM that will run the installed
+EVE-OS instance, it will have by default a single NIC with an embedded QEMU DHCP
+server and internet access therefore EVE-OS will be able to connect to Zedcloud
+and the edge-node should be successfully onboarded and `ONLINE` in Zedcloud:
 ```hcl
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name               = "EN_TEST_01_VM"
@@ -110,11 +126,13 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
 ## Setup on Ubuntu 24.04
 
 ### Install QEMU
-```
-# Install QEMU
-❯ sudo apt update
-sudo apt install qemu-system-x86-64
 
+```shell
+# Install QEMU
+sudo apt -y update && sudo apt install -y --no-install-recommends qemu-system-x86-64
+```
+
+```shell
 # Verify what is the group of /dev/kvm, if it doesn't have a specific group
 # this needs to be configured via udev rules.
 ❯ ls -lsah /dev/kvm
@@ -129,8 +147,8 @@ uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip
 ```
 
 ### Install Docker
-```
-❯ sudo install -m 0755 -d /etc/apt/keyrings                                                                         \
+```shell
+sudo install -m 0755 -d /etc/apt/keyrings                                                                           \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o - | sudo tee /etc/apt/keyrings/docker.asc         \
     && sudo chmod a+r /etc/apt/keyrings/docker.asc                                                                  \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -140,26 +158,21 @@ uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip
     && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin     \
     && sudo systemctl enable docker                                                                                 \
     && sudo systemctl start docker;
+```
 
+```shell
 # Check the groups of the current user and assign it the docker group.
 ❯ id
 uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),101(lxd)
 ❯ sudo usermod -aG docker $(whoami)
 ```
 
-### Install OpenTofu
-```
-curl -fsSL https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1.10.6_linux_amd64.tar.gz -o tofu_1.10.6_linux_amd64.tar.gz  \
-    && mkdir tofu_1.10.6_linux_amd64/                                                                                                       \
-    && tar -xzvf tofu_1.10.6_linux_amd64.tar.gz -C tofu_1.10.6_linux_amd64/                                                                 \
-    && mkdir -p ~/bin/                                                                                                                      \
-    && mv tofu_1.10.6_linux_amd64/tofu ~/bin/                                                                                               \
-    && ln -s ~/bin/tofu ~/bin/tf                                                                                                            \
-    && rm -rf ./tofu_1.10.6_linux_amd64*;
-
-```
-
 ### Install the zedamigo terraform provider locally
+
+zedamigo works well both with *terraform* and *OpenTofu* (recent versions).
+If either is already installed then the install script will use the already
+installed version. If neither is found then the install script will install
+the latest version of OpenTofu (and symlink it as `tf` for convenience).
 
 > NOTE: There are several methods of using a terraform provider which is not
 > published to a provider registry (https://registry.terraform.io/ or https://search.opentofu.org/).
@@ -168,9 +181,72 @@ curl -fsSL https://github.com/opentofu/opentofu/releases/download/v1.10.6/tofu_1
 > you have any specific configuration (for example dev overrides in `~/.config/opentofu/tofurc`
 or `~/.terraformrc`) then this might fail.
 
+The install script should finish with a message like `OpenTofu has been successfully initialized!`.
+
+```shell
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.2/install.sh | sh -s
 ```
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.1/install.sh | sh -s
+
+```shell
+Trying to install version 'latest' of the zedamigo terraform provider from https://github.com/andrei-zededa/terraform-provider-zedamigo (linux / amd64).
+No terraform or opentofu found. Will try to install the latest opentofu release from https://github.com/opentofu/opentofu .
+
+Initializing the backend...
+
+Initializing provider plugins...
+- Finding localhost/andrei-zededa/zedamigo versions matching "0.5.1"...
+- Installing localhost/andrei-zededa/zedamigo v0.5.1...
+- Installed localhost/andrei-zededa/zedamigo v0.5.1 (unauthenticated)
+
+OpenTofu has created a lock file .terraform.lock.hcl to record the provider
+selections it made above. Include this file in your version control repository
+so that OpenTofu can guarantee to make the same selections by default when
+you run "tofu init" in the future.
+
+╷
+│ Warning: Incomplete lock file information for providers
+│
+│ Due to your customized provider installation methods, OpenTofu was forced to calculate lock file checksums locally for the following providers:
+│   - localhost/andrei-zededa/zedamigo
+│
+│ The current .terraform.lock.hcl file only includes checksums for linux_amd64, so OpenTofu running on another platform will fail to install these providers.
+│
+│ To calculate additional checksums for another platform, run:
+│   tofu providers lock -platform=linux_amd64
+│ (where linux_amd64 is the platform to generate)
+╵
+
+OpenTofu has been successfully initialized!
+
+You may now begin working with OpenTofu. Try running "tofu plan" to see
+any changes that are required for your infrastructure. All OpenTofu commands
+should now work.
+
+If you ever set or change modules or backend configuration for OpenTofu,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
 ```
+
+## Documentation
+
+Each resource implemented by the zedamigo provider has documentation auto-generated
+from the source code in the [docs/](docs/) folder.
+
+> NOTE: currently *macOS* support is just planned, nothing works.
+
+| Resource | Linux (amd64) | macOS (arm64) | Notes |
+|---       |:---:          |:---:          |---    |
+| [disk_image](docs/resources/disk_image.md) | ✅ | ❌ | |
+| [eve_installer](docs/resources/eve_installer.md) | ✅ | ❌ | |
+| [installed_edge_node](docs/resources/installed_edge_node.md) | ✅ | ❌ | |
+| [edge_node](docs/resources/edge_node.md) | ✅ | ❌ | |
+| [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ❌ | If `genisoimage` is installed |
+| [bridge](docs/resources/bridge.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [tap](docs/resources/tap.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [vlan](docs/resources/vlan.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ❌ | It's just an alias for edge_node |
+| [vm](docs/resources/vm.md) | ✅ | ❌ | It's just an alias for edge_node |
+| [swtpm](docs/resources/swtpm.md) | ❌ | ❌ | WIP, currently not working |
 
 ## Troubleshooting
 
