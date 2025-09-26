@@ -31,11 +31,17 @@ var (
 
 	showVersion = flag.Bool("version", false, "Show the provider version")
 
-	socketTailer = flag.Bool("socket-tailer", false, "Run the binary in 'socket tailer' mode")
+	pidFile = flag.String("pid-file", "", "If non-empty then write the PID of the current process to this file.")
 
+	socketTailer = flag.Bool("socket-tailer", false, "Run the binary in 'socket tailer' mode")
+	// Socket tailer mode CLI flags.
 	listenPath  = flag.String("st.listen", "", "Socket tailer: listen on UNIX socket at given path")
 	connectPath = flag.String("st.connect", "", "Socket tailer: connect to existing UNIX socket at given path")
 	outputFile  = flag.String("st.out", "", "Socket tailer: output file (default: stdout)")
+
+	dhcpServer = flag.Bool("dhcp-server", false, "Run the binary in 'DHCP server' mode")
+	// DHCP server mode CLI flags.
+	dhcpConfig = flag.String("ds.config", "", "DHCP server: config file")
 )
 
 func main() {
@@ -46,6 +52,14 @@ func main() {
 			version, commit, buildDate, builtBy, treeState)
 		flag.Usage()
 		os.Exit(0)
+	}
+
+	if len(*pidFile) > 0 {
+		pid := os.Getpid()
+		if err := os.WriteFile(*pidFile, fmt.Appendf([]byte{}, "%d", pid), 0o640); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Can't write pid file '%s': %v\n", *pidFile, err)
+			os.Exit(1)
+		}
 	}
 
 	if *socketTailer {
@@ -65,6 +79,20 @@ func main() {
 		}
 
 		socketTailerMain()
+		os.Exit(0)
+	}
+
+	if *dhcpServer {
+		// Run in "DHCP server" mode and NOT the normal terraform provider mode.
+
+		// Validate CLI flags.
+		if *dhcpConfig == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'DHCP server' mode MUST specify either `-ds.config``.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		dhcpServerMain()
 		os.Exit(0)
 	}
 
