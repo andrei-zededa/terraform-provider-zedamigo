@@ -4,7 +4,7 @@ project_name: terraform-provider-zedamigo
 
 builds:
   - id: terraform-provider-zedamigo
-    main: ./main.go
+    # main: ./main.go # Default is `.` which includes all .go files in the current dir.
     binary: "{{ .ProjectName }}_v{{ .Version }}"
     env:
       - GOTOOLCHAIN=local
