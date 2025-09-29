@@ -15,10 +15,9 @@ builds:
       - 'osusergo netgo'
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.buildDate={{ .CommitDate }} -X main.builtBy=goreleaser -X main.treeState={{ .IsGitDirty }}
-    goos:
-      - linux
-    goarch:
-      - amd64
+    targets:
+      - linux_amd64
+      - darwin_arm64
 
 archives:
   # Standard Terraform-style ZIP archives.
