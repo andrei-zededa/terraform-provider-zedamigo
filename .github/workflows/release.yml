@@ -38,20 +38,23 @@ jobs:
       # Only on manual runs: compute 0.0.0-branch+commit and tag HEAD with it.
       - name: Create tag for manual release
         if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          # sanitize branch for semver prerelease (replace slashes/spaces, keep [.A-Za-z0-9-])
-          SAFE_BRANCH="$(echo "$BRANCH" | tr '/[:space:]' '-' | tr -cd 'A-Za-z0-9.-_')"
-          COMMIT="$(git rev-parse --short HEAD)"
-          VERSION="0.0.0-${SAFE_BRANCH}+${COMMIT}"
+          set -euo pipefail;
+          BRANCH="${GITHUB_REF_NAME}";
 
-          echo "Derived VERSION: $VERSION"
-          echo "GORELEASER_TAG=$VERSION" >> "$GITHUB_ENV"
+          # Produce a SemVer-safe prerelease identifier.
+          SAFE_BRANCH="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9A-Za-z]+//g')";
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # annotate to be explicit; goreleaser will publish the tag/release on GitHub
-          git tag -a "$VERSION" -m "Manual release from $BRANCH at $COMMIT"
+          COMMIT="$(git rev-parse --short HEAD)";
+          VERSION="0.0.0-dev.B${SAFE_BRANCH}+C${COMMIT}";
+
+          echo "Derived VERSION: $VERSION";
+          echo "GORELEASER_CURRENT_TAG=$VERSION" >> "$GITHUB_ENV";
+
+          git config user.name "github-actions[bot]";
+          git config user.email "github-actions[bot]@users.noreply.github.com";
+          git tag -a "$VERSION" -m "Manual release from $BRANCH at $COMMIT";
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6.4.0
