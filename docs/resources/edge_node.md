@@ -27,9 +27,25 @@ Edge Node / VM in the general case
 - `disk_size_mb` (Number) Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.
 - `drive_if` (String) The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.
 - `extra_qemu_args` (List of String) Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.
+				For example this can be used to create additional NICs for the edge node VM:
+				      extra_qemu_args = [
+				        "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
+				        "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:02",
+				        "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:03",
+    				      ]
+				Considering that the respective TAP interfaces are created with the `zedamigo_tap` resource.
 - `mem` (String) Amount of memory that the VM running the edge node will have. Default: 4G. Valid options: `4096`, `4096M`, `4G`.
 - `name` (String) Edge Node (or VM) name
-- `nic0` (String) QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `user,id=usernet0,hostfwd=tcp::${vm_ssh_port}-:22,model=virtio`
+- `nic0` (String) By default the first NIC (#0) of the edge node VM will use QEMU "user mode networking", which means that QEMU
+will run an internal DHCP server and internal NAT/router to provide the VM with the same connectivity that
+the QEMU process has on the host. This is convenient because it allows the VM to have external (external to the
+host, possibly full Internet access) connectivity without having to configure any firewall or NAT rules on the
+host. However this also means that the IPv4/v6 address allocated to the VM is not directly accesible from the
+host and port forwards need to be configured. By default a random port is allocated and that is setup as a port
+forward to the VM port 22. Two addtional ports forwards are set up: $random + 1 to 10022 and $random + 2 to 10080
+of the VM. These might be useful if the an edge-app-instance is configured with an inbound rule that maps ports
+10022 or 10080 of the edge node (EVE-OS) to ports of the edge-app-instance. Note that in this case to access an
+edge-app-instance from the host 2 levels of port forwards are involved.
 - `ovmf_vars_src` (String) UEFI OVMF vars source file (likely from the corresponding installed edge node)
 - `serial_port_server` (Boolean) Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file
 - `swtpm_socket` (String) swtpm process unix socket

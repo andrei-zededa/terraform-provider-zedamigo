@@ -19,8 +19,14 @@ Create and manage a DHCP v4 server instance with a simple configuration
 ## Example Usage
 
 ```terraform
+variable "intf_to_run_dhcp" {
+  sensitive = false
+  type      = string
+  default   = "eth1"
+}
+
 resource "zedamigo_dhcp_server" "test" {
-  interface  = "eth101"
+  interface  = var.intf_to_run_dhcp
   server_id  = "172.27.244.254"
   nameserver = "9.9.9.9"
   router     = "172.27.244.254"

@@ -14,6 +14,7 @@ import (
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/qmp"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -26,6 +27,7 @@ import (
 
 const (
 	edgeNodesDir = "edge_nodes"
+	nic0Fmt      = "user,id=usernet0,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:10022,hostfwd=tcp::%d-:10080,model=virtio"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -117,10 +119,20 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Required:            true,
 			},
 			"nic0": schema.StringAttribute{
-				Description:         "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `user,id=usernet0,hostfwd=tcp::${vm_ssh_port}-:22,model=virtio`",
-				MarkdownDescription: "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `user,id=usernet0,hostfwd=tcp::${vm_ssh_port}-:22,model=virtio`",
-				Optional:            true,
-				Required:            false,
+				Description: "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `" + nic0Fmt + "`",
+				MarkdownDescription: undent.Md(`
+				By default the first NIC (#0) of the edge node VM will use QEMU "user mode networking", which means that QEMU
+				will run an internal DHCP server and internal NAT/router to provide the VM with the same connectivity that
+				the QEMU process has on the host. This is convenient because it allows the VM to have external (external to the
+				host, possibly full Internet access) connectivity without having to configure any firewall or NAT rules on the
+				host. However this also means that the IPv4/v6 address allocated to the VM is not directly accesible from the
+				host and port forwards need to be configured. By default a random port is allocated and that is setup as a port
+				forward to the VM port 22. Two addtional ports forwards are set up: $random + 1 to 10022 and $random + 2 to 10080
+				of the VM. These might be useful if the an edge-app-instance is configured with an inbound rule that maps ports
+				10022 or 10080 of the edge node (EVE-OS) to ports of the edge-app-instance. Note that in this case to access an
+				edge-app-instance from the host 2 levels of port forwards are involved.`),
+				Optional: true,
+				Required: false,
 			},
 			"serial_port_server": schema.BoolAttribute{
 				Description:         "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
@@ -205,11 +217,19 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Computed:            true,
 			},
 			"extra_qemu_args": schema.ListAttribute{
-				Description:         "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
-				MarkdownDescription: "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
-				ElementType:         types.StringType,
-				Optional:            true,
-				Required:            false,
+				Description: "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
+				MarkdownDescription: undent.Md(`
+				Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.
+				For example this can be used to create additional NICs for the edge node VM:
+				      extra_qemu_args = [
+				        "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
+				        "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:02",
+				        "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:03",
+    				      ]
+				Considering that the respective TAP interfaces are created with the |zedamigo_tap| resource.`),
+				ElementType: types.StringType,
+				Optional:    true,
+				Required:    false,
 			},
 		},
 	}
@@ -349,7 +369,8 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
 
-	nic0 := fmt.Sprintf("user,id=usernet0,hostfwd=tcp::%d-:22,model=virtio", data.SSHPort.ValueInt32())
+	nic0 := fmt.Sprintf(nic0Fmt, data.SSHPort.ValueInt32(),
+		data.SSHPort.ValueInt32()+1, data.SSHPort.ValueInt32()+2)
 	if !data.Nic0.IsNull() && len(data.Nic0.ValueString()) > 0 {
 		nic0 = data.Nic0.ValueString()
 	}
