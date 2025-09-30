@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -63,9 +64,13 @@ func (r *EveInstaller) Metadata(ctx context.Context, req resource.MetadataReques
 
 func (r *EveInstaller) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "EVE-OS Installer",
-		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "EVE-OS Installer",
+		Description: "EVE-OS Installer ISO",
+		MarkdownDescription: undent.Md(`
+		It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+		the corresponding lfedge/eve container image according to [Get a custom EVE-OS image](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5) .
+		It supports all the customizations that the EVE-OS installer supports. the
+		resulting file can be used as the |installer_iso| attribute of a |zedamigo_installed_edge_node|
+		resource.`),
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -264,7 +269,8 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	res, err := cmd.Run(d, r.providerConf.Docker, "run", "--rm",
+	res, err := cmd.Run(d, r.providerConf.Docker, "run",
+		"--network", "none", "--rm",
 		"-v", fmt.Sprintf("%s:/in", filepath.Join(d, "config")),
 		"-v", fmt.Sprintf("%s:/out", filepath.Join(d, "out")),
 		fmt.Sprintf("docker.io/lfedge/eve:%s", data.Tag.ValueString()),

@@ -3,12 +3,20 @@
 page_title: "zedamigo_eve_installer Resource - zedamigo"
 subcategory: ""
 description: |-
-  EVE-OS Installer
+  It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+  the corresponding lfedge/eve container image according to Get a custom EVE-OS image https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5 .
+  It supports all the customizations that the EVE-OS installer supports. the
+  resulting file can be used as the installer_iso attribute of a zedamigo_installed_edge_node
+  resource.
 ---
 
 # zedamigo_eve_installer (Resource)
 
-EVE-OS Installer
+It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+the corresponding lfedge/eve container image according to [Get a custom EVE-OS image](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5) .
+It supports all the customizations that the EVE-OS installer supports. the
+resulting file can be used as the `installer_iso` attribute of a `zedamigo_installed_edge_node`
+resource.
 
 
 
