@@ -184,7 +184,7 @@ or `~/.terraformrc`) then this might fail.
 The install script should finish with a message like `OpenTofu has been successfully initialized!`.
 
 ```shell
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.2/install.sh | sh -s
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.5.4/install.sh | sh -s
 ```
 
 ```shell
@@ -194,9 +194,9 @@ No terraform or opentofu found. Will try to install the latest opentofu release 
 Initializing the backend...
 
 Initializing provider plugins...
-- Finding localhost/andrei-zededa/zedamigo versions matching "0.5.1"...
-- Installing localhost/andrei-zededa/zedamigo v0.5.1...
-- Installed localhost/andrei-zededa/zedamigo v0.5.1 (unauthenticated)
+- Finding localhost/andrei-zededa/zedamigo versions matching "0.5.4"...
+- Installing localhost/andrei-zededa/zedamigo v0.5.4...
+- Installed localhost/andrei-zededa/zedamigo v0.5.4 (unauthenticated)
 
 OpenTofu has created a lock file .terraform.lock.hcl to record the provider
 selections it made above. Include this file in your version control repository

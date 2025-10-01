@@ -1,0 +1,115 @@
+#cloud-config
+
+# Grow the root filesystem to maximum size, first the partition.
+growpart:
+  mode: auto
+  devices: ['/']
+  ignore_growroot_disabled: false
+
+# Create an user with SSH authentication.
+users:
+  - name: ####USERNAME####
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ####SSH_PUB_KEY####
+
+# Remove all users except just the one creted and required system users.
+userdel:
+  remove: true
+  force: true
+  users:
+    - ubuntu
+    - cloud-user
+    - ec2-user
+    - centos
+    - admin
+    - default
+    - user
+
+# Keep only essential system users.
+preserve_users:
+  - root
+  - systemd-network
+  - systemd-resolve
+  - systemd-timesync
+  - messagebus
+  - syslog
+  - _apt
+  - nobody
+  - systemd-coredump
+  - ####USERNAME####
+
+# Set password authentication to false for enhanced security.
+ssh_pwauth: false
+
+# Install additional packages.
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - wget
+  - gnupg
+  - lsb-release
+  - htop
+  - vim
+  - unzip
+  - git
+  - tmux
+  - jq
+  - net-tools
+  - dnsutils
+  - python3-scapy
+  
+# Update the package list and upgrade all packages on first boot.
+package_update: true
+package_upgrade: true
+
+# Configure SSH(d).
+ssh:
+  install-server: true
+  disable_root: true
+  ssh_deletekeys: true
+  ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+write_files:
+  - path: /etc/hosts
+    content: |
+      127.0.0.1 localhost
+      127.0.1.1 $zri.system.edge-instance.name
+      ::1 localhost ip6-localhost ip6-loopback
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+    permissions: '0644'
+    owner: root:root
+
+  # Embed the netplan config instead of having a separate network-config.
+  - path: /etc/netplan/01-network-config.yaml
+    content: |
+      network:
+       version: 2
+       ethernets:
+         allens:
+           match:
+             name: en*
+           dhcp4: true
+         alleths:
+           match:
+             name: eth*
+           dhcp4: true
+    permissions: '0644'
+    owner: root:root
+
+hostname: $zri.system.edge-instance.name
+fqdn: $zri.system.edge-instance.name
+
+runcmd:
+  # On Ubuntu there is a `/dev/root` symlink, but for example on Debian that
+  # doesn't exist. Grow the filesystem after growing the partition.
+  - 'resize2fs $(findmnt -n -o source /)'
+  - rm /etc/netplan/50-cloud-init.yaml # Because we embedded the netplan config above instead of having a separate network-config.
+  - netplan generate
+  - netplan apply
+
+# Final message on login screen
+final_message: "System is ready after $UPTIME seconds."
