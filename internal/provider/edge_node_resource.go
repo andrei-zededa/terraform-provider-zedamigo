@@ -15,7 +15,6 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/qmp"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
-	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -263,13 +262,8 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
-	u, err := uuid.NewV4()
-	if err != nil {
-		resp.Diagnostics.AddError("Edge Node Resource Error",
-			fmt.Sprintf("Unable to generate a new UUID: %s", err))
-		return
-	}
-	data.ID = types.StringValue(u.String())
+	sid := shortID()
+	data.ID = types.StringValue(sid)
 	if resp.Diagnostics.HasError() {
 		return
 	}

@@ -5,6 +5,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,7 +64,7 @@ type ZedAmigoProviderConfig struct {
 func NewDefaultZedAmigoProviderConfig() ZedAmigoProviderConfig {
 	return ZedAmigoProviderConfig{
 		Target:  DefaultZedAmigoTarget,
-		LibPath: filepath.Join(xdg.StateHome, DefaultZedAmigoLibPath),
+		LibPath: filepath.Join(xdg.CacheHome, DefaultZedAmigoLibPath),
 	}
 }
 
@@ -392,4 +393,23 @@ func extractFileIfNotExists(embeddedPath, targetPath string) error {
 	}
 
 	return nil
+}
+
+// shortID returns a 7-char Base58 string, uniformly random over 58^7.
+func shortID() string {
+	const (
+		alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+		length   = 7
+		base     = uint64(58)
+		space    = uint64(2207984167552) // 58^7
+	)
+
+	n := rand.Uint64N(space) // unbiased in [0, 58^7)
+
+	var buf [length]byte
+	for i := length - 1; i >= 0; i-- {
+		buf[i] = alphabet[int(n%base)]
+		n /= base
+	}
+	return string(buf[:])
 }
