@@ -336,18 +336,12 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 
 	data.QmpSocket = types.StringValue(fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")))
 
-	qemuArgs := []string{}
+	qemuArgs := qemuStdArgs
 	if !data.Name.IsNull() {
 		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_%s", data.Name.ValueString())}...)
 	} else {
 		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_%s", data.ID.ValueString())}...)
 	}
-
-	qemuArgs = append(qemuArgs, []string{
-		"--enable-kvm", "-machine", "q35,accel=kvm,kernel-irqchip=split",
-		"-nographic",
-	}...)
-
 	mem := "4G"
 	if !data.Mem.IsNull() {
 		mem = data.Mem.ValueString()
@@ -356,11 +350,9 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	if !data.CPUs.IsNull() {
 		cpus = data.CPUs.ValueString()
 	}
-
 	qemuArgs = append(qemuArgs, []string{
 		"-m", mem,
-		"-cpu", "host", "-smp", cpus,
-		"-device", "intel-iommu,intremap=on",
+		"-smp", cpus,
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		// "-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),

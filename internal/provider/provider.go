@@ -4,11 +4,11 @@ package provider
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -32,12 +32,6 @@ const (
 	// value is joined with `XDG_STATE_HOME`.
 	DefaultZedAmigoLibPath = "zedamigo"
 )
-
-// Embed OVMF files.
-//
-//go:embed embedded_ovmf/OVMF_CODE.fd
-//go:embed embedded_ovmf/OVMF_VARS.fd
-var embeddedOVMF embed.FS
 
 // Ensure ZedAmigoProvider satisfies various provider interfaces.
 var (
@@ -208,7 +202,7 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 
-	if err := os.MkdirAll(filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(zaConf.LibPath, embeddedOVMFTargetDir), 0o700); err != nil {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("lib_path"),
 			fmt.Sprintf("%s", err),
@@ -219,20 +213,26 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	for _, f := range []string{filepath.Join("embedded_ovmf", "OVMF_CODE.fd"), filepath.Join("embedded_ovmf", "OVMF_VARS.fd")} {
-		if err := extractFileIfNotExists(f, filepath.Join(zaConf.LibPath, f)); err != nil {
+	for _, f := range embeddedOVMFFiles {
+		tFile := filepath.Base(f)
+		tPath := filepath.Join(zaConf.LibPath, embeddedOVMFTargetDir, tFile)
+		if err := extractFileIfNotExists(f, tPath); err != nil {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("lib_path"),
 				fmt.Sprintf("%s", err),
 				fmt.Sprintf("Failed to extract OVMF file '%s': %v", f, err),
 			)
 		}
+		if strings.Contains(tFile, "CODE") || strings.Contains(tFile, "code") {
+			zaConf.BaseOVMFCode = tPath
+		}
+		if strings.Contains(tFile, "VARS") || strings.Contains(tFile, "vars") {
+			zaConf.BaseOVMFVars = tPath
+		}
 	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	zaConf.BaseOVMFCode = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_CODE.fd")
-	zaConf.BaseOVMFVars = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_VARS.fd")
 
 	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
 		zaConf.UseSudo = true
@@ -249,10 +249,10 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		// TODO: Might want to add here a symlink resolv step.
 	}
 
-	q, err := exec.LookPath("qemu-system-x86_64")
+	q, err := exec.LookPath(qemuSystemCmd)
 	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `qemu-system-x86_64` executable.",
-			fmt.Sprintf("Can't find the `qemu-system-x86_64` executable, got error: %v", err))
+		resp.Diagnostics.AddError(fmt.Sprintf("Can't find the `%s` executable.", qemuSystemCmd),
+			fmt.Sprintf("Can't find the `%s` executable, got error: %v", qemuSystemCmd, err))
 	}
 	if resp.Diagnostics.HasError() {
 		return

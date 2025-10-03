@@ -225,19 +225,15 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 
 	data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_install.log"))
 
-	qemuArgs := []string{}
+	qemuArgs := qemuStdArgs
 	if !data.Name.IsNull() {
 		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_install_%s", data.Name.ValueString())}...)
 	} else {
 		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_install_%s", data.ID.ValueString())}...)
 	}
-
 	qemuArgs = append(qemuArgs, []string{
-		"--enable-kvm", "-machine", "q35,accel=kvm,kernel-irqchip=split",
-		"-nographic",
-		"-m", "4096",
-		"-cpu", "host", "-smp", "4,cores=2",
-		"-device", "intel-iommu,intremap=on",
+		"-smp", "2,cores=1",
+		"-m", "2048",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		"-net", "user", "-net", "nic,model=virtio",
 		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
