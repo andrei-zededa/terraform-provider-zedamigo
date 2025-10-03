@@ -228,7 +228,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	qemuArgs = append(qemuArgs, []string{
 		"-smp", "2,cores=1",
 		"-m", "2048",
-		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
+		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell,product=ProLiant", data.SerialNo.ValueString()),
 		"-net", "user", "-net", "nic,model=virtio",
 		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
@@ -242,7 +242,6 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	qemuArgs = append(qemuArgs, disks...)
 	qemuArgs = append(qemuArgs, []string{
 		"-cdrom", data.InstallerISO.ValueString(),
-		"-boot", "once=d",
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)

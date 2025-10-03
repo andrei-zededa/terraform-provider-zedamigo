@@ -19,7 +19,7 @@ var (
 	qemuSystemCmd = "qemu-system-aarch64"
 	qemuStdArgs   = []string{
 		"-machine", "virt,accel=hvf",
-		"-cpu", "cortex-a72",
+		"-cpu", "host",
 		"-nographic",
 	}
 )
