@@ -312,8 +312,8 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ip, err := exec.LookPath("ip")
 	if err != nil {
-		resp.Diagnostics.AddError("Can't find `ip`.",
-			fmt.Sprintf("Can't find `ip`, got error: %v", err))
+		resp.Diagnostics.AddWarning("Can't find `ip`. Any resources that depend on it like bridge, tap, vlan will NOT work.",
+			fmt.Sprintf("This warning can be ignored if you don't use bridge, tap or vlan resources. Can't find `ip`, got error: %v", err))
 	}
 	if resp.Diagnostics.HasError() {
 		return
