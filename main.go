@@ -56,7 +56,7 @@ func main() {
 
 	if len(*pidFile) > 0 {
 		pid := os.Getpid()
-		if err := os.WriteFile(*pidFile, fmt.Appendf([]byte{}, "%d", pid), 0o640); err != nil {
+		if err := os.WriteFile(*pidFile, fmt.Appendf([]byte{}, "%d", pid), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Can't write pid file '%s': %v\n", *pidFile, err)
 			os.Exit(1)
 		}

@@ -3,10 +3,12 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -335,6 +338,36 @@ func (r *DHCPServer) Delete(ctx context.Context, req resource.DeleteRequest, res
 
 	d := r.getResourceDir(data.ID.ValueString())
 
+	// Kill the DHCP server process if it's running.
+	running, proc, err := readDHCPServerPID(d)
+	if err != nil {
+		resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
+			fmt.Sprintf("Can't find details of DHCP server process: %v", err))
+		return
+	}
+	if running {
+		var killErr error
+		if r.providerConf.UseSudo {
+			// Process was started with sudo, so we need sudo to kill it.
+			killCmd := r.providerConf.Sudo
+			killArgs := []string{"kill", fmt.Sprintf("%d", proc.Pid)}
+			res, err := cmd.Run(d, killCmd, killArgs...)
+			if err != nil {
+				killErr = err
+			} else if res.ExitCode != 0 {
+				killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
+			}
+		} else {
+			killErr = proc.Kill()
+		}
+
+		if killErr != nil {
+			resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
+				fmt.Sprintf("Can't kill DHCP server process: %v", killErr))
+			return
+		}
+	}
+
 	if err := os.RemoveAll(d); err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
 			fmt.Sprintf("Can't delete DHCPServer resource directory: %v", err))
@@ -348,4 +381,29 @@ func (r *DHCPServer) ImportState(ctx context.Context, req resource.ImportStateRe
 
 func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (diag.Diagnostics, error) {
 	return nil, nil
+}
+
+func readDHCPServerPID(path string) (bool, *process.Process, error) {
+	pidPath := filepath.Join(path, "pid")
+	x, err := os.ReadFile(pidPath)
+	if err != nil {
+		return false, nil, fmt.Errorf("%w", err)
+	}
+
+	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
+	if err != nil {
+		return false, nil, fmt.Errorf("%w", err)
+	}
+
+	p, err := process.NewProcess(int32(pid))
+	if err != nil {
+		return false, nil, fmt.Errorf("%w", err)
+	}
+
+	running, err := p.IsRunning()
+	if err != nil || !running {
+		return false, p, fmt.Errorf("process %d is not running", pid)
+	}
+
+	return true, p, nil
 }
