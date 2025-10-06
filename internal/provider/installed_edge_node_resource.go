@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/gofrs/uuid/v5"
@@ -44,12 +45,14 @@ type InstalledNodeModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	SerialNo         types.String `tfsdk:"serial_no"`
-	InstallerISO     types.String `tfsdk:"installer_iso"`
+	Installer        types.String `tfsdk:"installer"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
 	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
 	DiskImg          types.String `tfsdk:"disk_image"`
 	Disk1Img         types.String `tfsdk:"disk_1_image"`
+	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
+	SerialPortWait   types.Bool   `tfsdk:"serial_port_wait"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
 	Success          types.Bool   `tfsdk:"success"`
@@ -90,9 +93,9 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:            false,
 				Required:            true,
 			},
-			"installer_iso": schema.StringAttribute{
-				Description:         "Installed Edge Node EVE-OS Installer ISO file",
-				MarkdownDescription: "Installed Edge Node EVE-OS Installer ISO file",
+			"installer": schema.StringAttribute{
+				Description:         "EVE-OS Installer (ISO or RAW) file",
+				MarkdownDescription: "EVE-OS Installer (ISO or RAW( file",
 				Optional:            false,
 				Required:            true,
 			},
@@ -123,6 +126,17 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Description:         "Installed Edge Node 2nd disk disk image",
 				MarkdownDescription: "Installed Edge Node 2nd disk disk image",
 				Computed:            true,
+			},
+			"serial_port_socket": schema.StringAttribute{
+				Description:         "The file path of the UNIX socket for the serial port server",
+				MarkdownDescription: "The file path of the UNIX socket for the serial port server",
+				Computed:            true,
+			},
+			"serial_port_wait": schema.BoolAttribute{
+				Description:         "Wait for `socat UNIX-CLIENT:${serial_port_socket} -`",
+				MarkdownDescription: "Wait for `socat UNIX-CLIENT:${serial_port_socket} -",
+				Optional:            true,
+				Required:            false,
 			},
 			"serial_console_log": schema.StringAttribute{
 				Description:         "Edge Node log file of serial console output",
@@ -238,24 +252,39 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		"-m", "4096",
 		"-cpu", "host", "-smp", "4,cores=2",
 		"-device", "intel-iommu,intremap=on",
+		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
+		"-pidfile", filepath.Join(d, "qemu.pid"),
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		"-net", "user", "-net", "nic,model=virtio",
-		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
 	}...)
+
+	data.SerialPortSocket = types.StringValue(filepath.Join(d, "serial_port.socket"))
+	qemuArgs = append(qemuArgs, []string{"-serial", fmt.Sprintf("unix:%s,server,wait", data.SerialPortSocket.ValueString())}...)
+	data.SerialConsoleLog = types.StringValue(filepath.Join(d, ""))
+	if !data.SerialPortWait.ValueBool() {
+		data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_install.log"))
+		res, err = cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
+		if err != nil {
+			resp.Diagnostics.AddError("Edge Node Resource Error",
+				"Failed to run socket tailer")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	}
 
 	disks := []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i)}
 	if len(i2nd) > 0 {
 		disks = append(disks, []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i2nd)}...)
 	}
 	qemuArgs = append(qemuArgs, disks...)
-	qemuArgs = append(qemuArgs, []string{
-		"-cdrom", data.InstallerISO.ValueString(),
-		"-boot", "once=d",
-		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
-		"-pidfile", filepath.Join(d, "qemu.pid"),
-	}...)
+	instFile := data.Installer.ValueString()
+	if strings.HasSuffix(instFile, ".ISO") || strings.HasSuffix(instFile, ".iso") || strings.HasSuffix(instFile, ".Iso") {
+		qemuArgs = append(qemuArgs, []string{"-cdrom", instFile, "-boot", "once=d"}...)
+	} else {
+		qemuArgs = append(qemuArgs, []string{"-drive", fmt.Sprintf("file=%s,format=raw", instFile), "-boot", "once=d"}...)
+	}
 
 	swtpmSock := data.SwTPMSock.ValueString()
 	if swtpmSock != "" {
