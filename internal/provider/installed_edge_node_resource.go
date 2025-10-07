@@ -267,7 +267,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_install.log"))
 		res, err = cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
 		if err != nil {
-			resp.Diagnostics.AddError("Edge Node Resource Error",
+			resp.Diagnostics.AddError("Installed Edge Node Resource Error",
 				"Failed to run socket tailer")
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
@@ -283,7 +283,17 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	if strings.HasSuffix(instFile, ".ISO") || strings.HasSuffix(instFile, ".iso") || strings.HasSuffix(instFile, ".Iso") {
 		qemuArgs = append(qemuArgs, []string{"-cdrom", instFile, "-boot", "once=d"}...)
 	} else {
-		qemuArgs = append(qemuArgs, []string{"-drive", fmt.Sprintf("file=%s,format=raw", instFile), "-boot", "once=d"}...)
+		// NOTE: In this case we need to make a copy of the installer file,
+		// otherwise using it in multiple VMs at the same time will result
+		// in a locking error.
+		instFileDst := filepath.Join(d, instFile)
+		if _, err := cmd.Run(d, "cp", instFile, instFileDst); err != nil {
+			resp.Diagnostics.AddError("Installed Edge Node Resource Error",
+				fmt.Sprintf("%v", err))
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+		qemuArgs = append(qemuArgs, []string{"-drive", fmt.Sprintf("file=%s,format=raw", instFileDst), "-boot", "once=d"}...)
 	}
 
 	swtpmSock := data.SwTPMSock.ValueString()
