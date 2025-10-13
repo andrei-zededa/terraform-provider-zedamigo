@@ -48,7 +48,7 @@ jobs:
           SAFE_BRANCH="$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9A-Za-z]+//g')";
 
           COMMIT="$(git rev-parse --short HEAD)";
-          VERSION="0.0.0-dev.B${SAFE_BRANCH}+C${COMMIT}";
+          VERSION="0.0.0-dev.branch${SAFE_BRANCH}+commit${COMMIT}";
 
           echo "Derived VERSION: $VERSION";
           echo "GORELEASER_CURRENT_TAG=$VERSION" >> "$GITHUB_ENV";
