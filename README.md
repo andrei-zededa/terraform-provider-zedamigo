@@ -240,7 +240,9 @@ from the source code in the [docs/](docs/) folder.
 | [eve_installer](docs/resources/eve_installer.md) | ✅ | ❌ | |
 | [installed_edge_node](docs/resources/installed_edge_node.md) | ✅ | ❌ | |
 | [edge_node](docs/resources/edge_node.md) | ✅ | ❌ | |
+| [local_datastore](docs/resources/local_datastore.md) | ✅ | ❌ | Really just a simple Go web server |
 | [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ❌ | If `genisoimage` is installed |
+| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [bridge](docs/resources/bridge.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [tap](docs/resources/tap.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [vlan](docs/resources/vlan.md) | ✅ | ❌ | Needs `use_sudo = true` |

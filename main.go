@@ -18,6 +18,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
+type ExitCode int
+
+const (
+	ExitSuccess = ExitCode(0)
+	ExitError   = ExitCode(1)
+)
+
 var (
 	version   = "dev" // version string of the provider, should be set at build time.
 	commit    = ""    // commit id, should be set at build time.
@@ -42,6 +49,14 @@ var (
 	dhcpServer = flag.Bool("dhcp-server", false, "Run the binary in 'DHCP server' mode")
 	// DHCP server mode CLI flags.
 	dhcpConfig = flag.String("ds.config", "", "DHCP server: config file")
+
+	httpServer = flag.Bool("http-server", false, "Run the binary in 'HTTP server' mode")
+	// HTTP server mode CLI flags.
+	httpListen    = flag.String("hs.listen", ":8080", "HTTP server: listen address (host:port)")
+	httpStaticDir = flag.String("hs.static-dir", ".", "HTTP server: directory to serve static files from")
+	httpBwLimit   = flag.String("hs.bw-limit", "2GB", "HTTP server: bandwidth limit (e.g., '2m', '2mb', '2M', '2MB')")
+	httpUsername  = flag.String("hs.username", "", "HTTP server: username for HTTP basic auth (empty disables auth)")
+	httpPassword  = flag.String("hs.password", "", "HTTP server: password for HTTP basic auth")
 )
 
 func main() {
@@ -94,6 +109,11 @@ func main() {
 
 		dhcpServerMain()
 		os.Exit(0)
+	}
+
+	if *httpServer {
+		// Run in "HTTP server" mode and NOT the normal terraform provider mode.
+		os.Exit(int(httpServerMain()))
 	}
 
 	opts := providerserver.ServeOpts{
