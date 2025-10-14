@@ -53,6 +53,7 @@ type LocalDatastoreModel struct {
 	Username  types.String `tfsdk:"username"`
 	Password  types.String `tfsdk:"password"`
 	PIDFile   types.String `tfsdk:"pid_file"`
+	State     types.String `tfsdk:"state"`
 }
 
 func (r *LocalDatastore) getResourceDir(id string) string {
@@ -114,6 +115,13 @@ func (r *LocalDatastore) Schema(ctx context.Context, req resource.SchemaRequest,
 			"pid_file": schema.StringAttribute{
 				Computed:    true,
 				Description: "Process ID file",
+			},
+			"state": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Desired state of the HTTP server daemon",
+				MarkdownDescription: undent.Md(`Desired state of the HTTP server daemon. Can be "running" or "stopped".
+				Defaults to "running". The provider will automatically start or stop the daemon to match this state.`),
 			},
 		},
 	}
@@ -179,35 +187,18 @@ func (r *LocalDatastore) Create(ctx context.Context, req resource.CreateRequest,
 	pidFile := filepath.Join(d, "pid")
 	data.PIDFile = types.StringValue(pidFile)
 
-	// Build command arguments
-	srvCmd := os.Args[0]
-	args := []string{"-pid-file", pidFile, "-http-server"}
-
-	// Add optional arguments
-	if !data.Listen.IsNull() && data.Listen.ValueString() != "" {
-		args = append(args, "-hs.listen", data.Listen.ValueString())
+	// Set default state to "running" if not specified
+	if data.State.IsNull() || data.State.ValueString() == "" {
+		data.State = types.StringValue("running")
 	}
 
-	args = append(args, "-hs.static-dir", data.StaticDir.ValueString())
-
-	if !data.BwLimit.IsNull() && data.BwLimit.ValueString() != "" {
-		args = append(args, "-hs.bw-limit", data.BwLimit.ValueString())
-	}
-
-	if !data.Username.IsNull() && data.Username.ValueString() != "" {
-		args = append(args, "-hs.username", data.Username.ValueString())
-	}
-
-	if !data.Password.IsNull() && data.Password.ValueString() != "" {
-		args = append(args, "-hs.password", data.Password.ValueString())
-	}
-
-	// Run the HTTP server in detached mode
-	if res, err := cmd.RunDetached(d, srvCmd, args...); err != nil {
-		resp.Diagnostics.AddError("LocalDatastore Resource Error",
-			"Failed to run HTTP server")
-		resp.Diagnostics.Append(res.Diagnostics()...)
-		return
+	// Only start the daemon if state is "running"
+	if data.State.ValueString() == "running" {
+		if err := r.startLocalDatastore(d, &data); err != nil {
+			resp.Diagnostics.AddError("LocalDatastore Resource Error",
+				fmt.Sprintf("Failed to start HTTP server: %v", err))
+			return
+		}
 	}
 
 	// Read the LocalDatastore current state.
@@ -251,15 +242,87 @@ func (r *LocalDatastore) Read(ctx context.Context, req resource.ReadRequest, res
 }
 
 func (r *LocalDatastore) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data LocalDatastoreModel
+	var plan LocalDatastoreModel
+	var state LocalDatastoreModel
 
-	// Read Terraform plan data into the model
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	// Read Terraform plan and current state
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.Diagnostics.AddError("LocalDatastore Resource Update Error", "Update is not supported.")
+	d := r.getResourceDir(state.ID.ValueString())
+
+	// Check if only the state field changed
+	stateChanged := !plan.State.Equal(state.State)
+	configChanged := !plan.Listen.Equal(state.Listen) ||
+		!plan.StaticDir.Equal(state.StaticDir) ||
+		!plan.BwLimit.Equal(state.BwLimit) ||
+		!plan.Username.Equal(state.Username) ||
+		!plan.Password.Equal(state.Password)
+
+	// If configuration changed, we need to restart the daemon
+	if configChanged {
+		tflog.Info(ctx, "HTTP server configuration changed, restarting daemon...")
+
+		// Stop the current daemon if running
+		if err := r.stopLocalDatastore(d); err != nil {
+			tflog.Warn(ctx, "Failed to stop HTTP server before restart", map[string]any{"error": err.Error()})
+		}
+
+		// Start with new configuration if desired state is running
+		desiredState := plan.State.ValueString()
+		if desiredState == "" {
+			desiredState = "running"
+		}
+
+		if desiredState == "running" {
+			if err := r.startLocalDatastore(d, &plan); err != nil {
+				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
+					fmt.Sprintf("Failed to restart HTTP server with new configuration: %v", err))
+				return
+			}
+		}
+		plan.State = types.StringValue(desiredState)
+	} else if stateChanged {
+		// Only state field changed
+		desiredState := plan.State.ValueString()
+		if desiredState == "" {
+			desiredState = "running"
+		}
+
+		tflog.Info(ctx, "HTTP server state change requested", map[string]any{
+			"from": state.State.ValueString(),
+			"to":   desiredState,
+		})
+
+		if desiredState == "running" {
+			if err := r.startLocalDatastore(d, &plan); err != nil {
+				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
+					fmt.Sprintf("Failed to start HTTP server: %v", err))
+				return
+			}
+		} else if desiredState == "stopped" {
+			if err := r.stopLocalDatastore(d); err != nil {
+				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
+					fmt.Sprintf("Failed to stop HTTP server: %v", err))
+				return
+			}
+		}
+
+		plan.State = types.StringValue(desiredState)
+	}
+
+	// Read back the current state to verify
+	if diags, err := r.readLocalDatastore(d, &plan); err != nil {
+		resp.Diagnostics.AddError("Failed to read LocalDatastore state after update", err.Error())
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
+	// Save updated data into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *LocalDatastore) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -273,19 +336,10 @@ func (r *LocalDatastore) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	// Kill the HTTP server process if it's running.
-	running, proc, err := readLocalDatastorePID(d)
-	if err != nil {
-		resp.Diagnostics.AddError("LocalDatastore Resource Delete Error",
-			fmt.Sprintf("Can't find details of HTTP server process: %v", err))
-		return
-	}
-	if running {
-		if err := proc.Kill(); err != nil {
-			resp.Diagnostics.AddError("LocalDatastore Resource Delete Error",
-				fmt.Sprintf("Can't kill HTTP server process: %v", err))
-			return
-		}
+	// Stop the HTTP server process if it's running.
+	if err := r.stopLocalDatastore(d); err != nil {
+		// Log as warning instead of error, since the daemon might already be stopped
+		tflog.Warn(ctx, "Failed to stop HTTP server during delete", map[string]any{"error": err.Error()})
 	}
 
 	if err := os.RemoveAll(d); err != nil {
@@ -299,10 +353,92 @@ func (r *LocalDatastore) ImportState(ctx context.Context, req resource.ImportSta
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
+// startLocalDatastore starts the HTTP server daemon for the given resource
+func (r *LocalDatastore) startLocalDatastore(d string, data *LocalDatastoreModel) error {
+	srvCmd := os.Args[0]
+	args := []string{"-pid-file", data.PIDFile.ValueString(), "-http-server"}
+
+	// Add optional arguments
+	if !data.Listen.IsNull() && data.Listen.ValueString() != "" {
+		args = append(args, "-hs.listen", data.Listen.ValueString())
+	}
+
+	args = append(args, "-hs.static-dir", data.StaticDir.ValueString())
+
+	if !data.BwLimit.IsNull() && data.BwLimit.ValueString() != "" {
+		args = append(args, "-hs.bw-limit", data.BwLimit.ValueString())
+	}
+
+	if !data.Username.IsNull() && data.Username.ValueString() != "" {
+		args = append(args, "-hs.username", data.Username.ValueString())
+	}
+
+	if !data.Password.IsNull() && data.Password.ValueString() != "" {
+		args = append(args, "-hs.password", data.Password.ValueString())
+	}
+
+	if res, err := cmd.RunDetached(d, srvCmd, args...); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w, diagnostics: %v", err, res.Diagnostics())
+	}
+	return nil
+}
+
+// stopLocalDatastore stops the HTTP server daemon for the given resource
+func (r *LocalDatastore) stopLocalDatastore(d string) error {
+	running, proc, err := readLocalDatastorePID(d)
+	if err != nil {
+		return fmt.Errorf("can't find HTTP server process: %w", err)
+	}
+	if !running {
+		return nil // Already stopped
+	}
+
+	if err := proc.Kill(); err != nil {
+		return fmt.Errorf("can't kill HTTP server process: %w", err)
+	}
+	return nil
+}
+
 func (r *LocalDatastore) readLocalDatastore(resPath string, model *LocalDatastoreModel) (diag.Diagnostics, error) {
-	// Verify the process is still running
-	_, _, err := readLocalDatastorePID(resPath)
-	return nil, err
+	// Check if resource directory exists
+	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("resource directory does not exist")
+	}
+
+	// Determine desired state (default to "running" if not set)
+	desiredState := "running"
+	if !model.State.IsNull() && model.State.ValueString() != "" {
+		desiredState = model.State.ValueString()
+	}
+
+	// Check if daemon is actually running
+	running, _, _ := readLocalDatastorePID(resPath)
+	actualState := "stopped"
+	if running {
+		actualState = "running"
+	}
+
+	// Self-healing: reconcile actual state with desired state
+	if desiredState == "running" && actualState == "stopped" {
+		// Daemon should be running but isn't - restart it
+		tflog.Info(context.Background(), "HTTP server daemon is stopped but should be running, restarting...")
+		if err := r.startLocalDatastore(resPath, model); err != nil {
+			return nil, fmt.Errorf("failed to restart HTTP server: %w", err)
+		}
+		actualState = "running"
+	} else if desiredState == "stopped" && actualState == "running" {
+		// Daemon should be stopped but is running - stop it
+		tflog.Info(context.Background(), "HTTP server daemon is running but should be stopped, stopping...")
+		if err := r.stopLocalDatastore(resPath); err != nil {
+			return nil, fmt.Errorf("failed to stop HTTP server: %w", err)
+		}
+		actualState = "stopped"
+	}
+
+	// Update state to match actual state
+	model.State = types.StringValue(actualState)
+
+	return nil, nil
 }
 
 func readLocalDatastorePID(path string) (bool, *process.Process, error) {

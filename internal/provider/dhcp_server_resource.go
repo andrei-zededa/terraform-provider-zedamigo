@@ -71,6 +71,7 @@ type DHCPServerModel struct {
 	LeasesFile types.String `tfsdk:"leases_file"`
 	ConfigFile types.String `tfsdk:"config_file"`
 	PIDFile    types.String `tfsdk:"pid_file"`
+	State      types.String `tfsdk:"state"`
 }
 
 func (r *DHCPServer) getResourceDir(id string) string {
@@ -150,6 +151,13 @@ func (r *DHCPServer) Schema(ctx context.Context, req resource.SchemaRequest, res
 			"pid_file": schema.StringAttribute{
 				Computed:    true,
 				Description: "Process ID file",
+			},
+			"state": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Desired state of the DHCP server daemon",
+				MarkdownDescription: undent.Md(`Desired state of the DHCP server daemon. Can be "running" or "stopped".
+				Defaults to "running". The provider will automatically start or stop the daemon to match this state.`),
 			},
 		},
 	}
@@ -259,18 +267,18 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 	pidFile := filepath.Join(d, "pid")
 	data.PIDFile = types.StringValue(pidFile)
 
-	srvCmd := os.Args[0]
-	srvArgs := []string{}
-	if r.providerConf.UseSudo {
-		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{os.Args[0]}
+	// Set default state to "running" if not specified
+	if data.State.IsNull() || data.State.ValueString() == "" {
+		data.State = types.StringValue("running")
 	}
-	moreArgs := []string{"-pid-file", pidFile, "-dhcp-server", "-ds.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
-		resp.Diagnostics.AddError("Edge Node Resource Error",
-			"Failed to run socket tailer")
-		resp.Diagnostics.Append(res.Diagnostics()...)
-		return
+
+	// Only start the daemon if state is "running"
+	if data.State.ValueString() == "running" {
+		if err := r.startDHCPServer(d, &data); err != nil {
+			resp.Diagnostics.AddError("DHCPServer Resource Error",
+				fmt.Sprintf("Failed to start DHCP server: %v", err))
+			return
+		}
 	}
 
 	// Read the DHCPServer current state.
@@ -314,17 +322,71 @@ func (r *DHCPServer) Read(ctx context.Context, req resource.ReadRequest, resp *r
 }
 
 func (r *DHCPServer) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data DHCPServerModel
+	var plan DHCPServerModel
+	var state DHCPServerModel
 
-	// Read Terraform plan data into the model
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	// Read Terraform plan and current state
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// TODO: What to do here ?
+	d := r.getResourceDir(state.ID.ValueString())
 
-	resp.Diagnostics.AddError("DHCPServer Resource Update Error", "Update is not supported.")
+	// Check if only the state field changed
+	stateChanged := !plan.State.Equal(state.State)
+	configChanged := !plan.Interface.Equal(state.Interface) ||
+		!plan.ServerID.Equal(state.ServerID) ||
+		!plan.NameServer.Equal(state.NameServer) ||
+		!plan.Router.Equal(state.Router) ||
+		!plan.Netmask.Equal(state.Netmask) ||
+		!plan.PoolStart.Equal(state.PoolStart) ||
+		!plan.PoolEnd.Equal(state.PoolEnd)
+
+	if configChanged {
+		resp.Diagnostics.AddError("DHCPServer Resource Update Error",
+			"Configuration changes require resource recreation. Only the 'state' field can be updated in-place.")
+		return
+	}
+
+	if stateChanged {
+		desiredState := plan.State.ValueString()
+		if desiredState == "" {
+			desiredState = "running"
+		}
+
+		tflog.Info(ctx, "DHCP server state change requested", map[string]any{
+			"from": state.State.ValueString(),
+			"to":   desiredState,
+		})
+
+		if desiredState == "running" {
+			if err := r.startDHCPServer(d, &plan); err != nil {
+				resp.Diagnostics.AddError("DHCPServer Resource Update Error",
+					fmt.Sprintf("Failed to start DHCP server: %v", err))
+				return
+			}
+		} else if desiredState == "stopped" {
+			if err := r.stopDHCPServer(d); err != nil {
+				resp.Diagnostics.AddError("DHCPServer Resource Update Error",
+					fmt.Sprintf("Failed to stop DHCP server: %v", err))
+				return
+			}
+		}
+
+		plan.State = types.StringValue(desiredState)
+	}
+
+	// Read back the current state to verify
+	if diags, err := r.readDHCPServer(d, &plan); err != nil {
+		resp.Diagnostics.AddError("Failed to read DHCPServer state after update", err.Error())
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+
+	// Save updated data into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *DHCPServer) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -338,34 +400,10 @@ func (r *DHCPServer) Delete(ctx context.Context, req resource.DeleteRequest, res
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	// Kill the DHCP server process if it's running.
-	running, proc, err := readDHCPServerPID(d)
-	if err != nil {
-		resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
-			fmt.Sprintf("Can't find details of DHCP server process: %v", err))
-		return
-	}
-	if running {
-		var killErr error
-		if r.providerConf.UseSudo {
-			// Process was started with sudo, so we need sudo to kill it.
-			killCmd := r.providerConf.Sudo
-			killArgs := []string{"kill", fmt.Sprintf("%d", proc.Pid)}
-			res, err := cmd.Run(d, killCmd, killArgs...)
-			if err != nil {
-				killErr = err
-			} else if res.ExitCode != 0 {
-				killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-			}
-		} else {
-			killErr = proc.Kill()
-		}
-
-		if killErr != nil {
-			resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
-				fmt.Sprintf("Can't kill DHCP server process: %v", killErr))
-			return
-		}
+	// Stop the DHCP server process if it's running.
+	if err := r.stopDHCPServer(d); err != nil {
+		// Log as warning instead of error, since the daemon might already be stopped
+		tflog.Warn(ctx, "Failed to stop DHCP server during delete", map[string]any{"error": err.Error()})
 	}
 
 	if err := os.RemoveAll(d); err != nil {
@@ -379,7 +417,91 @@ func (r *DHCPServer) ImportState(ctx context.Context, req resource.ImportStateRe
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
+// startDHCPServer starts the DHCP server daemon for the given resource
+func (r *DHCPServer) startDHCPServer(d string, data *DHCPServerModel) error {
+	srvCmd := os.Args[0]
+	srvArgs := []string{}
+	if r.providerConf.UseSudo {
+		srvCmd = r.providerConf.Sudo
+		srvArgs = []string{os.Args[0]}
+	}
+	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-dhcp-server", "-ds.config", data.ConfigFile.ValueString()}
+	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+		return fmt.Errorf("failed to start DHCP server: %w, diagnostics: %v", err, res.Diagnostics())
+	}
+	return nil
+}
+
+// stopDHCPServer stops the DHCP server daemon for the given resource
+func (r *DHCPServer) stopDHCPServer(d string) error {
+	running, proc, err := readDHCPServerPID(d)
+	if err != nil {
+		return fmt.Errorf("can't find DHCP server process: %w", err)
+	}
+	if !running {
+		return nil // Already stopped
+	}
+
+	var killErr error
+	if r.providerConf.UseSudo {
+		// Process was started with sudo, so we need sudo to kill it.
+		killCmd := r.providerConf.Sudo
+		killArgs := []string{"kill", fmt.Sprintf("%d", proc.Pid)}
+		res, err := cmd.Run(d, killCmd, killArgs...)
+		if err != nil {
+			killErr = err
+		} else if res.ExitCode != 0 {
+			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
+		}
+	} else {
+		killErr = proc.Kill()
+	}
+
+	if killErr != nil {
+		return fmt.Errorf("can't kill DHCP server process: %w", killErr)
+	}
+	return nil
+}
+
 func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (diag.Diagnostics, error) {
+	// Check if resource directory exists
+	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("resource directory does not exist")
+	}
+
+	// Determine desired state (default to "running" if not set)
+	desiredState := "running"
+	if !model.State.IsNull() && model.State.ValueString() != "" {
+		desiredState = model.State.ValueString()
+	}
+
+	// Check if daemon is actually running
+	running, _, _ := readDHCPServerPID(resPath)
+	actualState := "stopped"
+	if running {
+		actualState = "running"
+	}
+
+	// Self-healing: reconcile actual state with desired state
+	if desiredState == "running" && actualState == "stopped" {
+		// Daemon should be running but isn't - restart it
+		tflog.Info(context.Background(), "DHCP server daemon is stopped but should be running, restarting...")
+		if err := r.startDHCPServer(resPath, model); err != nil {
+			return nil, fmt.Errorf("failed to restart DHCP server: %w", err)
+		}
+		actualState = "running"
+	} else if desiredState == "stopped" && actualState == "running" {
+		// Daemon should be stopped but is running - stop it
+		tflog.Info(context.Background(), "DHCP server daemon is running but should be stopped, stopping...")
+		if err := r.stopDHCPServer(resPath); err != nil {
+			return nil, fmt.Errorf("failed to stop DHCP server: %w", err)
+		}
+		actualState = "stopped"
+	}
+
+	// Update state to match actual state
+	model.State = types.StringValue(actualState)
+
 	return nil, nil
 }
 
