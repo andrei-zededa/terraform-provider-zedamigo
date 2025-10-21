@@ -162,7 +162,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Create the bridge.
@@ -252,7 +252,7 @@ func (r *Bridge) Read(ctx context.Context, req resource.ReadRequest, resp *resou
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Read the bridge current state.
@@ -303,7 +303,7 @@ func (r *Bridge) Delete(ctx context.Context, req resource.DeleteRequest, resp *r
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Delete an existing bridge.

@@ -170,7 +170,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Create the VLAN sub-interface, e.g. sudo ip link add link eth100 name eth100.64 type vlan id 64
@@ -263,7 +263,7 @@ func (r *VLAN) Read(ctx context.Context, req resource.ReadRequest, resp *resourc
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Read the VLAN current state.
@@ -314,7 +314,7 @@ func (r *VLAN) Delete(ctx context.Context, req resource.DeleteRequest, resp *res
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Delete an existing VLAN.

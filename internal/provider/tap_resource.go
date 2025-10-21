@@ -188,7 +188,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Create the TAP.
@@ -299,7 +299,7 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Read the TAP current state.
@@ -350,7 +350,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	ipArgs := []string{}
 	if r.providerConf.UseSudo {
 		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{r.providerConf.IP}
+		ipArgs = []string{"-n", r.providerConf.IP}
 	}
 
 	// Remove from bridge first if attached.

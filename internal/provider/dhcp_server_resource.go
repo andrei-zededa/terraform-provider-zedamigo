@@ -423,7 +423,7 @@ func (r *DHCPServer) startDHCPServer(d string, data *DHCPServerModel) error {
 	srvArgs := []string{}
 	if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{os.Args[0]}
+		srvArgs = []string{"-n", os.Args[0]}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-dhcp-server", "-ds.config", data.ConfigFile.ValueString()}
 	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
@@ -446,7 +446,7 @@ func (r *DHCPServer) stopDHCPServer(d string) error {
 	if r.providerConf.UseSudo {
 		// Process was started with sudo, so we need sudo to kill it.
 		killCmd := r.providerConf.Sudo
-		killArgs := []string{"kill", fmt.Sprintf("%d", proc.Pid)}
+		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
 		res, err := cmd.Run(d, killCmd, killArgs...)
 		if err != nil {
 			killErr = err
