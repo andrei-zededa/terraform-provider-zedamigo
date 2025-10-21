@@ -72,3 +72,11 @@ resource "zedamigo_tap" "TAP_103" {
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_103.name
 }
+
+resource "zedamigo_tap" "TAP_104" {
+  name  = "tap104-${var.config_suffix}"
+  mtu   = "1500"
+  state = "up"
+  group = "kvm"
+  # master = zedamigo_bridge.BRIDGE_103.name
+}

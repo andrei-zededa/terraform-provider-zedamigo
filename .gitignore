@@ -1,6 +1,7 @@
 internal/socket/cmd/socket-tailer/socket-tailer
 terraform-provider-zedamigo*
 **/*.tfstate*
+**/.terraform/
 **/.env
 **/.envrc
 **/terraform.tfvars

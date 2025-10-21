@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -256,7 +257,9 @@ func (r *Bridge) Read(ctx context.Context, req resource.ReadRequest, resp *resou
 
 	// Read the bridge current state.
 	if diags, err := r.readBridge(d, ipCmd, ipArgs, &data); err != nil {
-		if strings.Contains(err.Error(), "does not exist") {
+		// Check for various error messages that indicate the device doesn't exist.
+		if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
+			// Resource was deleted outside Terraform: remove from state.
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -307,7 +310,15 @@ func (r *Bridge) Delete(ctx context.Context, req resource.DeleteRequest, resp *r
 	moreArgs := []string{"link", "delete", br, "type", "bridge"}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		if !strings.Contains(err.Error(), "does not exist") {
+		errMsg := err.Error()
+		// Check for various error messages that indicate the device doesn't exist.
+		// If the device doesn't exist, the delete is successful (idempotent),
+		// otherwise we need to treat it like an error.
+		if !strings.Contains(errMsg, "does not exist") &&
+			!strings.Contains(errMsg, "Cannot find device") &&
+			!strings.Contains(errMsg, "cannot find device") &&
+			!strings.Contains(errMsg, "No such device") &&
+			!strings.Contains(errMsg, "no such device") {
 			resp.Diagnostics.AddError("Failed to delete bridge", err.Error())
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return

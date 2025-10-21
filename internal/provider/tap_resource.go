@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -28,6 +29,17 @@ import (
 const (
 	tapIntfsDir = "tap_intfs"
 )
+
+// intfNotFoundStrs is a list of strings that might be present in various
+// Linux "show interface" commands and tell us that the specific interface
+// is not present.
+var intfNotFoundStrs = []string{
+	"does not exist",
+	"Cannot find device",
+	"cannot find device",
+	"No such device",
+	"no such device",
+}
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
@@ -292,7 +304,9 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 
 	// Read the TAP current state.
 	if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
-		if strings.Contains(err.Error(), "does not exist") {
+		// Check for various error messages that indicate the device doesn't exist.
+		if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
+			// Resource was deleted outside Terraform: remove from state.
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -344,7 +358,11 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		moreArgs := []string{"link", "set", "dev", tapIf, "nomaster"}
 		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
-			if !strings.Contains(err.Error(), "does not exist") {
+			// Check for various error messages that indicate the device doesn't exist.
+			// If the device doesn't exist, the delete is successful (idempotent),
+			// otherwise we need to treat it like an error.
+			if errchecker.ContainsNone(err, intfNotFoundStrs) &&
+				errchecker.DiagsNone(res.Diagnostics(), intfNotFoundStrs) {
 				resp.Diagnostics.AddError("Failed to delete TAP", err.Error())
 				resp.Diagnostics.Append(res.Diagnostics()...)
 				return
@@ -357,7 +375,11 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap"}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
-		if !strings.Contains(err.Error(), "does not exist") {
+		// Check for various error messages that indicate the device doesn't exist.
+		// If the device doesn't exist, the delete is successful (idempotent),
+		// otherwise we need to treat it like an error.
+		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
+			errchecker.DiagsNone(res.Diagnostics(), intfNotFoundStrs) {
 			resp.Diagnostics.AddError("Failed to delete TAP", err.Error())
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return

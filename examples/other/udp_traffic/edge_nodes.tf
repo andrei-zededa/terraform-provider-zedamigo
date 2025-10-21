@@ -26,13 +26,6 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
   project_id     = zedcloud_project.PROJECT.id
   admin_state    = "ADMIN_STATE_ACTIVE"
 
-  base_image {
-    activate   = true
-    image_name = "14.5.1-lts-kvm-amd64"
-    version    = ""
-    imvol_id   = "472ce38a-0ce8-4336-9baa-6db8cf4ff755"
-  }
-
   config_item {
     key          = "debug.enable.ssh"
     string_value = var.edge_node_ssh_pub_key
@@ -41,38 +34,46 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
   }
 
   interfaces {
-    intfname   = "eth0"
+    intfname   = "port0"
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   interfaces {
-    intfname   = "eth1"
+    intfname   = "port1"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   interfaces {
-    intfname   = "eth2"
+    intfname   = "port2"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   interfaces {
-    intfname   = "eth3"
+    intfname   = "port3"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
+  }
+
+  interfaces {
+    intfname   = "port4"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
+    cost       = 0
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   tags = {}
@@ -88,8 +89,8 @@ resource "zedamigo_disk_image" "empty_disk_100G" {
 #### This creates a custom EVE-OS installer ISO, it basically runs
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer_iso" {
-  name            = "EVE-OS_14.5.0-lts-kvm-amd64"
-  tag             = "14.5.0-lts-kvm-amd64"
+  name            = "EVE-OS_14.5.1-lts-kvm-amd64"
+  tag             = "14.5.1-lts-kvm-amd64"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -102,9 +103,8 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso" {
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
 #### created and run the install process.
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
-  name = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
-  # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  serial_no       = "SN_TEST_AAAA_${var.config_suffix}"
+  name            = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
+  serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
   installer_iso   = zedamigo_eve_installer.eve_os_installer_iso.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
@@ -146,8 +146,41 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.ovmf_vars
 
   extra_qemu_args = [
-    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
-    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:02",
-    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:03",
+    # ''Simple'' way of adding more NICs:
+    #
+    #    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
+    #    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:02",
+    #    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:03",
+    #
+    # More ''complicated'' way which results in the following PCI topology:
+    #
+    #   49d1519f-8083-4016-b3c4-f6b0edfed7fe:~# lspci -tv
+    #   -[0000:00]-+-00.0  Intel Corporation 82G33/G31/P35/P31 Express DRAM Controller
+    #              +-01.0  Device 1234:1111
+    #              +-02.0  Red Hat, Inc. Virtio network device
+    #              +-10.0-[01-02]----00.0-[02]--+-00.0  Intel Corporation 82540EM Gigabit Ethernet Controller
+    #              |                            +-01.0  Intel Corporation 82540EM Gigabit Ethernet Controller
+    #              |                            +-02.0  Intel Corporation 82540EM Gigabit Ethernet Controller
+    #              |                            \-03.0  Intel Corporation 82540EM Gigabit Ethernet Controller
+    #              +-1f.0  Intel Corporation 82801IB (ICH9) LPC Interface Controller
+    #              +-1f.2  Intel Corporation 82801IR/IO/IH (ICH9R/DO/DH) 6 port SATA Controller [AHCI mode]
+    #              \-1f.3  Intel Corporation 82801I (ICH9 Family) SMBus Controller
+    #   49d1519f-8083-4016-b3c4-f6b0edfed7fe:~# lspci -v | grep Ethernet
+    #   00:02.0 Ethernet controller: Red Hat, Inc. Virtio network device
+    #   02:00.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    #   02:01.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    #   02:02.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    #   02:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    #
+    "-device", "pcie-root-port,id=pcie1,bus=pcie.0,addr=0x10",
+    "-device", "pci-bridge,id=pci1,bus=pcie1,chassis_nr=1",
+    "-device", "e1000,netdev=vmnet1,mac=8c:84:74:10:00:00,bus=pci1,addr=0x0",
+    "-device", "e1000,netdev=vmnet2,mac=8c:84:74:10:00:01,bus=pci1,addr=0x1",
+    "-device", "e1000,netdev=vmnet3,mac=8c:84:74:10:00:02,bus=pci1,addr=0x2",
+    "-device", "e1000,netdev=vmnet4,mac=8c:84:74:10:00:03,bus=pci1,addr=0x3",
+    "-netdev", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet4,ifname=${zedamigo_tap.TAP_104.name},script=no,downscript=no",
   ]
 }

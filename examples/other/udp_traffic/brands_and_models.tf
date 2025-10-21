@@ -19,10 +19,10 @@ resource "zedcloud_model" "QEMU_VM" {
   type           = "AMD64"
 
   io_member_list {
-    assigngrp    = "eth0"
+    assigngrp    = "group0"
     cbattr       = {}
     cost         = 0
-    logicallabel = "eth0"
+    logicallabel = "port0"
     phyaddrs = {
       Ifname = "eth0"
     }
@@ -33,12 +33,13 @@ resource "zedcloud_model" "QEMU_VM" {
   }
 
   io_member_list {
-    assigngrp    = "eth1"
+    assigngrp    = "group1"
     cbattr       = {}
     cost         = 0
-    logicallabel = "eth1"
+    logicallabel = "port1"
     phyaddrs = {
-      Ifname = "eth1"
+      Ifname  = "eth1" # Matching just on PciLong doesn't work !
+      PciLong = "0002:00.0"
     }
     phylabel     = "eth1"
     usage        = "ADAPTER_USAGE_APP_SHARED"
@@ -47,12 +48,13 @@ resource "zedcloud_model" "QEMU_VM" {
   }
 
   io_member_list {
-    assigngrp    = "eth2"
+    assigngrp    = "group2"
     cbattr       = {}
     cost         = 0
-    logicallabel = "eth2"
+    logicallabel = "port2"
     phyaddrs = {
-      Ifname = "eth2"
+      Ifname  = "eth2" # Matching just on PciLong doesn't work !
+      PciLong = "0002:01.0"
     }
     phylabel     = "eth2"
     usage        = "ADAPTER_USAGE_APP_SHARED"
@@ -61,14 +63,30 @@ resource "zedcloud_model" "QEMU_VM" {
   }
 
   io_member_list {
-    assigngrp    = "eth3"
+    assigngrp    = "group3"
     cbattr       = {}
     cost         = 0
-    logicallabel = "eth3"
+    logicallabel = "port3"
     phyaddrs = {
-      Ifname = "eth3"
+      Ifname  = "eth3" # Matching just on PciLong doesn't work !
+      PciLong = "0002:02.0"
     }
     phylabel     = "eth3"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage_policy = {}
+    ztype        = "IO_TYPE_ETH"
+  }
+
+  io_member_list {
+    assigngrp    = "group4"
+    cbattr       = {}
+    cost         = 0
+    logicallabel = "port4"
+    phyaddrs = {
+      Ifname  = "eth4" # Matching just on PciLong doesn't work !
+      PciLong = "0002:02.0"
+    }
+    phylabel     = "eth4"
     usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"

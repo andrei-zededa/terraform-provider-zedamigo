@@ -18,5 +18,5 @@ variable "edge_node_ssh_pub_key" {
 # ensure that.
 variable "config_suffix" {
   type    = string
-  default = "1234"
+  default = "abc123"
 }
