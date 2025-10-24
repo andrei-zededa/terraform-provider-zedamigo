@@ -4,6 +4,7 @@ go 1.24.1
 
 require (
 	github.com/adrg/xdg v0.5.3
+	github.com/andrei-zededa/hello-zedcloud v0.8.3
 	github.com/coredhcp/coredhcp v0.0.0-20250806070228-f7e98e4e350b
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/gofrs/uuid/v5 v5.3.2
@@ -13,9 +14,11 @@ require (
 	github.com/hashicorp/terraform-plugin-log v0.9.0
 	github.com/hashicorp/terraform-plugin-testing v1.12.0
 	github.com/matryer/is v1.4.1
+	github.com/mdlayher/ndp v1.1.0
 	github.com/shirou/gopsutil/v4 v4.25.3
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/sys v0.36.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -26,7 +29,6 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
 	github.com/agext/levenshtein v1.2.2 // indirect
-	github.com/andrei-zededa/hello-zedcloud v0.8.3 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
@@ -128,7 +130,6 @@ require (
 	google.golang.org/grpc v1.69.4 // indirect
 	google.golang.org/protobuf v1.36.3 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.66.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
@@ -137,4 +138,4 @@ require (
 
 tool github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
 
-replace github.com/coredhcp/coredhcp => github.com/andrei-zededa/coredhcp v0.0.0-20251001192825-8e248125781c
+replace github.com/coredhcp/coredhcp => github.com/andrei-zededa/coredhcp v0.0.0-20251024133138-9b5d082582ef

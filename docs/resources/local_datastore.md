@@ -32,6 +32,8 @@ Create and manage a local HTTP server instance that serves static files.
 				If not specified, defaults to :8080.
 - `password` (String, Sensitive) Password for HTTP basic authentication. Only used when
 				username is also specified.
+- `state` (String) Desired state of the HTTP server daemon. Can be "running" or "stopped".
+				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
 - `username` (String, Sensitive) Username for HTTP basic authentication. If empty (default),
 				authentication is disabled. If specified, password must also be provided.
 

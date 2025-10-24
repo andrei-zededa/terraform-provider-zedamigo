@@ -1,0 +1,40 @@
+version: 2
+ethernets:
+  # Configure all ethernet devices with DHCP
+  # eth0:
+  #  dhcp4: true
+  #  dhcp6: true
+  #  match:
+  #    name: eth*
+  #    macaddress: "52:54:00:12:34:56"
+  #  set-name: eth0
+
+  # Optional: Configure specific ethernet device
+  # ens3:
+  #   dhcp4: true
+  #   dhcp6: true
+
+  # Optional: Configure all ethernet network interfaces
+  all-eth:
+    match:
+      name: eth*
+    dhcp4: true
+    dhcp6: true
+
+  all-en:
+    match:
+      name: en*
+    dhcp4: true
+    dhcp6: true
+
+# Optional: Wifi configuration
+# wifis:
+#   wlan0:
+#     dhcp4: true
+#     dhcp6: true
+#     access-points:
+#       "network_ssid_name":
+#         password: "**********"
+
+# Apply configuration immediately
+renderer: networkd

@@ -242,10 +242,12 @@ from the source code in the [docs/](docs/) folder.
 | [edge_node](docs/resources/edge_node.md) | ✅ | ❌ | |
 | [local_datastore](docs/resources/local_datastore.md) | ✅ | ❌ | Really just a simple Go web server |
 | [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ❌ | If `genisoimage` is installed |
-| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [bridge](docs/resources/bridge.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [tap](docs/resources/tap.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [vlan](docs/resources/vlan.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [dhcp6_server](docs/resources/dhcp6_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
+| [radv](docs/resources/radv.md) | ✅ | ❌ | Needs `use_sudo = true` |
 | [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ❌ | It's just an alias for edge_node |
 | [vm](docs/resources/vm.md) | ✅ | ❌ | It's just an alias for edge_node |
 | [swtpm](docs/resources/swtpm.md) | ❌ | ❌ | WIP, currently not working |

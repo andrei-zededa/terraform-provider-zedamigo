@@ -53,6 +53,11 @@ resource "zedamigo_dhcp_server" "test" {
 				This resource DOES NOT configure the host.
 - `server_id` (String) IPv4 address representing the DHCP server ID
 
+### Optional
+
+- `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
+				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
+
 ### Read-Only
 
 - `config_file` (String) The auto-generated CoreDHCP configuration file

@@ -1,0 +1,100 @@
+#cloud-config
+
+# Grow the root filesystem to maximum size, first the partition.
+growpart:
+  mode: auto
+  devices: ['/']
+  ignore_growroot_disabled: false
+
+# Grow the filesystem after growing the partition.
+runcmd:
+  # On Ubuntu there is a `/dev/root` symlink, but for example on Debian that
+  # doesn't exist.
+  - 'resize2fs $(findmnt -n -o source /)'
+
+# Create an user with SSH authentication.
+users:
+  - name: ${user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${user_ssh_pub_key} 
+
+# Remove all users except just the one creted and required system users.
+userdel:
+  remove: true
+  force: true
+  users:
+    - ubuntu
+    - cloud-user
+    - ec2-user
+    - centos
+    - admin
+    - default
+    - user
+
+# Keep only essential system users.
+preserve_users:
+  - root
+  - systemd-network
+  - systemd-resolve
+  - systemd-timesync
+  - messagebus
+  - syslog
+  - _apt
+  - nobody
+  - systemd-coredump
+  - ${user} 
+
+# Set password authentication to false for enhanced security.
+ssh_pwauth: false
+
+# Install additional packages.
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - wget
+  - gnupg
+  - lsb-release
+  - htop
+  - vim
+  - unzip
+  - git
+  - tmux
+  - jq
+  - net-tools
+  - dnsutils
+  
+# Update the package list and upgrade all packages on first boot.
+package_update: true
+package_upgrade: true
+
+# Configure SSH(d).
+ssh:
+  install-server: true
+  disable_root: true
+  ssh_deletekeys: true
+  ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+write_files:
+  - path: /etc/hosts
+    content: |
+      127.0.0.1 localhost
+      127.0.1.1 ${hostname}.${domainname} ${hostname}
+      ::1 localhost ip6-localhost ip6-loopback
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+      
+      # Custom entries
+%{ for host in custom_hosts ~}
+      ${host.ipv4_addr} ${host.name}%{ if try(host.aliases, "") != "" } ${try(host.aliases, "")}%{ endif }
+%{ endfor ~}
+    permissions: '0644'
+    owner: root:root
+
+hostname: ${hostname}
+fqdn: ${hostname}.${domainname}
+
+# Final message on login screen
+final_message: "System is ready after $UPTIME seconds."

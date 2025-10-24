@@ -17,7 +17,9 @@ resource "zedamigo_bridge" "br1000" {
   name         = "test-br-1000"
   mtu          = "1500"
   state        = "up"
+  mac_address  = "02:00:00:72:b3:01"
   ipv4_address = "172.27.199.129/25"
+  ipv6_address = "2000:abcd::1/64"
 }
 ```
 
@@ -31,6 +33,8 @@ resource "zedamigo_bridge" "br1000" {
 ### Optional
 
 - `ipv4_address` (String) IPv4 address for the bridge
+- `ipv6_address` (String) IPv6 address for the bridge
+- `mac_address` (String) MAC address for the bridge
 - `mtu` (Number) MTU size for the bridge
 - `state` (String) State of the bridge (up/down)
 

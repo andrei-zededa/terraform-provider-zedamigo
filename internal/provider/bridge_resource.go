@@ -51,7 +51,9 @@ type BridgeModel struct {
 	Name        types.String `tfsdk:"name"`
 	MTU         types.Int64  `tfsdk:"mtu"`
 	State       types.String `tfsdk:"state"`
+	MACAddress  types.String `tfsdk:"mac_address"`
 	IPv4Address types.String `tfsdk:"ipv4_address"`
+	IPv6Address types.String `tfsdk:"ipv6_address"`
 }
 
 func (r *Bridge) getResourceDir(id string) string {
@@ -94,8 +96,17 @@ func (r *Bridge) Schema(ctx context.Context, req resource.SchemaRequest, resp *r
 				Optional:    true,
 				Computed:    true,
 			},
+			"mac_address": schema.StringAttribute{
+				Description: "MAC address for the bridge",
+				Optional:    true,
+				Computed:    true,
+			},
 			"ipv4_address": schema.StringAttribute{
 				Description: "IPv4 address for the bridge",
+				Optional:    true,
+			},
+			"ipv6_address": schema.StringAttribute{
+				Description: "IPv6 address for the bridge",
 				Optional:    true,
 			},
 		},
@@ -201,6 +212,19 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		}
 	}
 
+	// Set the MAC address if specified.
+	if !data.MACAddress.IsNull() && !data.MACAddress.IsUnknown() {
+		macAddr := data.MACAddress.ValueString()
+		moreArgs := []string{"link", "set", "dev", br, "address", macAddr}
+		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			resp.Diagnostics.AddError("Bridge Resource Error",
+				"Unable to set MAC address for bridge.")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	}
+
 	// Configure an IPv4 address if specified.
 	if !data.IPv4Address.IsNull() && !data.IPv4Address.IsUnknown() {
 		addr := data.IPv4Address.ValueString()
@@ -210,6 +234,29 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		if err != nil {
 			resp.Diagnostics.AddError("Invalid IPv4 address format",
 				fmt.Sprintf("IPv4 address must be in CIDR format (e.g., '192.168.1.1/24'): %s", err.Error()))
+			return
+		}
+
+		moreArgs := []string{"addr", "add", addr, "dev", br}
+		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			resp.Diagnostics.AddError("Bridge Resource Error",
+				"Unable to create a new bridge.")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+
+	}
+
+	// Configure an IPv6 address if specified.
+	if !data.IPv6Address.IsNull() && !data.IPv6Address.IsUnknown() {
+		addr := data.IPv6Address.ValueString()
+
+		// Validate the CIDR format
+		_, _, err := net.ParseCIDR(addr)
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid IPv6 address format",
+				fmt.Sprintf("IPv6 address must be in CIDR format (e.g., 'fd00::1/64'): %s", err.Error()))
 			return
 		}
 
@@ -346,7 +393,7 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 		return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' details: %w", br, err)
 	}
 
-	// Parse output for MTU and state.
+	// Parse output for MTU, state, and MAC address.
 	lines := strings.Split(res.Stdout, "\n")
 	if len(lines) > 0 {
 		// Parse first line: "2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ..."
@@ -369,6 +416,14 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 		}
 	}
 
+	// Parse MAC address from second line: "    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff"
+	if len(lines) > 1 {
+		macRegex := regexp.MustCompile(`link/ether\s+([0-9a-fA-F:]+)`)
+		if matches := macRegex.FindStringSubmatch(lines[1]); len(matches) > 1 {
+			model.MACAddress = types.StringValue(matches[1])
+		}
+	}
+
 	// Get IP address(es) of bridge.
 	moreArgs = []string{"addr", "show", br}
 	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
@@ -381,6 +436,25 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 		// Validate using net.ParseCIDR to ensure it's properly formatted
 		if _, _, err := net.ParseCIDR(matches[1]); err == nil {
 			model.IPv4Address = types.StringValue(matches[1])
+		}
+	}
+
+	// Look for IPv6 address in CIDR format: inet6 fd00::1/64 scope ...
+	// Skip link-local addresses (fe80::/10) as these are auto-configured
+	addr6Regex := regexp.MustCompile(`inet6 ([0-9a-fA-F:]+/\d+)`)
+	matches := addr6Regex.FindAllStringSubmatch(res.Stdout, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			// Parse and validate the address
+			ip, _, err := net.ParseCIDR(match[1])
+			if err != nil {
+				continue
+			}
+			// Skip link-local addresses (fe80::/10)
+			if !ip.IsLinkLocalUnicast() {
+				model.IPv6Address = types.StringValue(match[1])
+				break
+			}
 		}
 	}
 
