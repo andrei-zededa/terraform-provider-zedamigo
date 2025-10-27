@@ -86,7 +86,7 @@ func radvMain() {
 	if err != nil {
 		if errchecker.ContainsAny(err, []string{`address "linklocal" not found on interface`, `bind: cannot assign requested address`}) {
 			// Wait a bit as the interface might have just been created.
-			time.Sleep(10 * time.Second)
+			time.Sleep(2 * time.Second)
 			c, i, newErr := ndp.Listen(iface, ndp.LinkLocal)
 			if newErr != nil {
 				log.Fatalf("Failed to create NDP connection: %v", newErr)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -278,7 +279,36 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		return
 	}
 
-	tflog.Trace(ctx, "Bridge Resource created succesfully")
+	// Now we know the MAC address of the bridge whether it was specifically
+	// configured or not.
+	if !data.IPv6Address.IsNull() && !data.IPv6Address.IsUnknown() {
+		// If the configuration also included an IPv6 address we need
+		// to ensure that the bridge interface has a link-local address
+		// configured.
+		//
+		// NOTE: This is usually handled automatically by the Linux
+		// kernel however that automatic link-local address config only
+		// happens when the interface state changes to UP, which depending
+		// on other resources (like VMs starting) might only happen much
+		// later. At the same time other resources like RADV depend only
+		// the interface having a link-local address sooner.
+		ll, err := lladdr.LinkLocalIPv6FromMACString(data.MACAddress.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Bridge Resource Error",
+				fmt.Sprintf("Can't configure link-local address '%s' on bridge interface: %v", ll.String(), err))
+			return
+		}
+		moreArgs := []string{"addr", "add", fmt.Sprintf("%s/64", ll.String()), "scope", "link", "dev", br}
+		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			resp.Diagnostics.AddError("Bridge Resource Error",
+				"Unable to create a new bridge.")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	}
+
+	tflog.Trace(ctx, "Bridge Resource created successfully")
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
