@@ -57,6 +57,7 @@ var (
 	radv = flag.Bool("radv", false, "Run the binary in 'Router Advertisement' mode")
 	// Router Advertisement mode CLI flags.
 	radvConfig = flag.String("radv.config", "", "RADV: config file")
+	radvWait   = flag.Bool("radv.wait", false, "RADV: Wait for the interface to become available")
 
 	httpServer = flag.Bool("http-server", false, "Run the binary in 'HTTP server' mode")
 	// HTTP server mode CLI flags.

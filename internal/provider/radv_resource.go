@@ -474,7 +474,7 @@ func (r *RADV) startRADV(d string, data *RADVModel) error {
 		srvCmd = r.providerConf.Sudo
 		srvArgs = []string{"-n", os.Args[0]}
 	}
-	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-radv", "-radv.config", data.ConfigFile.ValueString()}
+	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-radv", "-radv.wait", "-radv.config", data.ConfigFile.ValueString()}
 	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start RADV daemon: %w, diagnostics: %v", err, res.Diagnostics())
 	}

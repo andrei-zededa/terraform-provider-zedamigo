@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/mdlayher/ndp"
 	"gopkg.in/yaml.v3"
 )
@@ -84,17 +83,21 @@ func radvMain() {
 	}
 	conn, ip, err := ndp.Listen(iface, ndp.LinkLocal)
 	if err != nil {
-		if errchecker.ContainsAny(err, []string{`address "linklocal" not found on interface`, `bind: cannot assign requested address`}) {
+		if !*radvWait {
+			log.Fatalf("Failed to create NDP connection: %v", err)
+		}
+		for {
 			// Wait a bit as the interface might have just been created.
 			time.Sleep(2 * time.Second)
 			c, i, newErr := ndp.Listen(iface, ndp.LinkLocal)
 			if newErr != nil {
-				log.Fatalf("Failed to create NDP connection: %v", newErr)
+				log.Printf("Still waiting for the NDP connection: %v", newErr)
+				continue
 			}
 			conn = c
 			ip = i
-		} else {
-			log.Fatalf("Failed to create NDP connection: %v", err)
+			err = newErr
+			break
 		}
 	}
 	defer conn.Close()
