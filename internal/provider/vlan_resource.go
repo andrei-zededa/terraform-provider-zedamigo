@@ -14,6 +14,7 @@ import (
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -53,7 +54,9 @@ type VLANModel struct {
 	MTU         types.Int64  `tfsdk:"mtu"`
 	State       types.String `tfsdk:"state"`
 	Parent      types.String `tfsdk:"parent"`
+	MACAddress  types.String `tfsdk:"mac_address"`
 	IPv4Address types.String `tfsdk:"ipv4_address"`
+	IPv6Address types.String `tfsdk:"ipv6_address"`
 }
 
 func (r *VLAN) getResourceDir(id string) string {
@@ -101,8 +104,17 @@ func (r *VLAN) Schema(ctx context.Context, req resource.SchemaRequest, resp *res
 				Optional:    false,
 				Required:    true,
 			},
+			"mac_address": schema.StringAttribute{
+				Description: "MAC address for the VLAN sub-interface",
+				Optional:    true,
+				Computed:    true,
+			},
 			"ipv4_address": schema.StringAttribute{
 				Description: "IPv4 address to configure on the VLAN sub-interface",
+				Optional:    true,
+			},
+			"ipv6_address": schema.StringAttribute{
+				Description: "IPv6 address for the VLAN sub-interface",
 				Optional:    true,
 			},
 		},
@@ -235,11 +247,63 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 
 	}
 
+	// Configure an IPv6 address if specified.
+	if !data.IPv6Address.IsNull() && !data.IPv6Address.IsUnknown() {
+		addr := data.IPv6Address.ValueString()
+
+		// Validate the CIDR format
+		_, _, err := net.ParseCIDR(addr)
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid IPv6 address format",
+				fmt.Sprintf("IPv6 address must be in CIDR format (e.g., 'fd00::1/64'): %s", err.Error()))
+			return
+		}
+
+		moreArgs := []string{"addr", "add", addr, "dev", subIf}
+		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				"Unable to create a new VLAN.")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+
+	}
+
 	// Read the VLAN current state.
 	if diags, err := r.readVLAN(d, ipCmd, ipArgs, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read VLAN state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
+	}
+
+	// Now we know the MAC address of the VLAN interface whether it was specifically
+	// configured or not.
+	if !data.IPv6Address.IsNull() && !data.IPv6Address.IsUnknown() {
+		// If the configuration also included an IPv6 address we need
+		// to ensure that the VLAN interface has a link-local address
+		// configured.
+		//
+		// NOTE: This is usually handled automatically by the Linux
+		// kernel however that automatic link-local address config only
+		// happens when the interface state changes to UP, which depending
+		// on other resources (like VMs starting) might only happen much
+		// later. At the same time other resources like RADV depend only
+		// the interface having a link-local address sooner.
+		ll, err := lladdr.LinkLocalIPv6FromMACString(data.MACAddress.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				fmt.Sprintf("Can't configure link-local address '%s' on VLAN interface: %v", ll.String(), err))
+			return
+		}
+		moreArgs := []string{"addr", "add", fmt.Sprintf("%s/64", ll.String()), "scope", "link", "dev", subIf}
+		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			resp.Diagnostics.AddError("VLAN Resource Error",
+				"Unable to create a new VLAN.")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
 	}
 
 	tflog.Trace(ctx, "VLAN Resource created succesfully")
@@ -376,6 +440,14 @@ func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VL
 		}
 	}
 
+	// Parse MAC address from second line: "    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff"
+	if len(lines) > 1 {
+		macRegex := regexp.MustCompile(`link/ether\s+([0-9a-fA-F:]+)`)
+		if matches := macRegex.FindStringSubmatch(lines[1]); len(matches) > 1 {
+			model.MACAddress = types.StringValue(matches[1])
+		}
+	}
+
 	// Get IP address(es) of VLAN.
 	moreArgs = []string{"addr", "show", subIf}
 	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
@@ -388,6 +460,25 @@ func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VL
 		// Validate using net.ParseCIDR to ensure it's properly formatted
 		if _, _, err := net.ParseCIDR(matches[1]); err == nil {
 			model.IPv4Address = types.StringValue(matches[1])
+		}
+	}
+
+	// Look for IPv6 address in CIDR format: inet6 fd00::1/64 scope ...
+	// Skip link-local addresses (fe80::/10) as these are auto-configured
+	addr6Regex := regexp.MustCompile(`inet6 ([0-9a-fA-F:]+/\d+)`)
+	matches := addr6Regex.FindAllStringSubmatch(res.Stdout, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			// Parse and validate the address
+			ip, _, err := net.ParseCIDR(match[1])
+			if err != nil {
+				continue
+			}
+			// Skip link-local addresses (fe80::/10)
+			if !ip.IsLinkLocalUnicast() {
+				model.IPv6Address = types.StringValue(match[1])
+				break
+			}
 		}
 	}
 

@@ -43,6 +43,8 @@ resource "zedamigo_vlan" "v2000" {
 ### Optional
 
 - `ipv4_address` (String) IPv4 address to configure on the VLAN sub-interface
+- `ipv6_address` (String) IPv6 address for the VLAN sub-interface
+- `mac_address` (String) MAC address for the VLAN sub-interface
 - `mtu` (Number) MTU size for the VLAN sub-interface
 - `state` (String) State of the VLAN sub-interface (up/down)
 
