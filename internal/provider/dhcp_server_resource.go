@@ -34,11 +34,11 @@ server4:
   listen:
     - "%{{ .Interface }}:67"
   plugins:
-    - lease_time: 3600s
-    - server_id: {{ .ServerID }} 
-    - dns: {{ .NameServer }} 
-    - router: {{ .Router }} 
-    - netmask: {{ .Netmask }} 
+    - lease_time: {{ .LeaseTime }}s
+    - server_id: {{ .ServerID }}
+    - dns: {{ .NameServer }}
+    - router: {{ .Router }}
+    - netmask: {{ .Netmask }}
     - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} 180s
 `
 )
@@ -68,6 +68,7 @@ type DHCPServerModel struct {
 	Netmask    types.String `tfsdk:"netmask"`
 	PoolStart  types.String `tfsdk:"pool_start"`
 	PoolEnd    types.String `tfsdk:"pool_end"`
+	LeaseTime  types.Int64  `tfsdk:"lease_time"`
 	LeasesFile types.String `tfsdk:"leases_file"`
 	ConfigFile types.String `tfsdk:"config_file"`
 	PIDFile    types.String `tfsdk:"pid_file"`
@@ -139,6 +140,13 @@ func (r *DHCPServer) Schema(ctx context.Context, req resource.SchemaRequest, res
 				Description: "DHCP v4 pool last IPv4 address for dynamic allocation",
 				Optional:    false,
 				Required:    true,
+			},
+			"lease_time": schema.Int64Attribute{
+				Description: "DHCP lease time in seconds",
+				MarkdownDescription: undent.Md(`DHCP lease time in seconds. This determines how long a client can use an assigned IP address before needing to renew the lease.
+				Defaults to 3600 seconds (1 hour).`),
+				Optional: true,
+				Computed: true,
 			},
 			"leases_file": schema.StringAttribute{
 				Computed:    true,
@@ -236,6 +244,11 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 	data.ConfigFile = types.StringValue(confPath)
 	data.LeasesFile = types.StringValue(leasesPath)
 
+	// Set default lease time if not specified.
+	if data.LeaseTime.IsNull() || data.LeaseTime.IsUnknown() {
+		data.LeaseTime = types.Int64Value(3600)
+	}
+
 	// If we don't do this mapping and try to directly pass `data` to
 	// template.Execute then that will call field.String() which returns
 	// the value double-quoted.
@@ -247,6 +260,7 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 		Netmask    string
 		PoolStart  string
 		PoolEnd    string
+		LeaseTime  int64
 		LeasesFile string
 	}{
 		Interface:  data.Interface.ValueString(),
@@ -256,6 +270,7 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 		Netmask:    data.Netmask.ValueString(),
 		PoolStart:  data.PoolStart.ValueString(),
 		PoolEnd:    data.PoolEnd.ValueString(),
+		LeaseTime:  data.LeaseTime.ValueInt64(),
 		LeasesFile: data.LeasesFile.ValueString(),
 	}
 	if err := tmpl.Execute(confFile, td); err != nil {
@@ -342,7 +357,8 @@ func (r *DHCPServer) Update(ctx context.Context, req resource.UpdateRequest, res
 		!plan.Router.Equal(state.Router) ||
 		!plan.Netmask.Equal(state.Netmask) ||
 		!plan.PoolStart.Equal(state.PoolStart) ||
-		!plan.PoolEnd.Equal(state.PoolEnd)
+		!plan.PoolEnd.Equal(state.PoolEnd) ||
+		!plan.LeaseTime.Equal(state.LeaseTime)
 
 	if configChanged {
 		resp.Diagnostics.AddError("DHCPServer Resource Update Error",

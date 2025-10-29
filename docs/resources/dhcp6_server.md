@@ -27,10 +27,12 @@ variable "intf_to_run_dhcp6" {
 
 resource "zedamigo_dhcp6_server" "test" {
   interface  = var.intf_to_run_dhcp6
+  server_id  = "aa:bb:cc:dd:ee:ff"
   prefix     = "fd00:abcd:1234::/64"
   nameserver = "2606:4700:4700::1111"
   pool_start = "fd00:abcd:1234::100"
   pool_end   = "fd00:abcd:1234::199"
+  lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
 ```
 
@@ -49,6 +51,8 @@ resource "zedamigo_dhcp6_server" "test" {
 
 ### Optional
 
+- `lease_time` (Number) DHCPv6 lease time in seconds. This determines how long a client can use an assigned IPv6 address before needing to renew the lease.
+				Defaults to 3600 seconds (1 hour).
 - `prefix` (String) Prefix delegation
 - `state` (String) Desired state of the DHCPv6 server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.

@@ -33,6 +33,7 @@ resource "zedamigo_dhcp_server" "test" {
   netmask    = "255.255.255.0"
   pool_start = "172.27.244.100"
   pool_end   = "172.27.244.199"
+  lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
 ```
 
@@ -55,6 +56,8 @@ resource "zedamigo_dhcp_server" "test" {
 
 ### Optional
 
+- `lease_time` (Number) DHCP lease time in seconds. This determines how long a client can use an assigned IP address before needing to renew the lease.
+				Defaults to 3600 seconds (1 hour).
 - `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
 

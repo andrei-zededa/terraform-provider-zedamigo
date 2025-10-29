@@ -38,6 +38,7 @@ server6:
     # - server_id: <DUID format> <LL address>
     # The supported DUID formats are LL and LLT
     - server_id: LL {{ .ServerID }}
+    - lease_time: {{ .LeaseTime }}s
     - dns: {{ .NameServer }}
     - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} 180s
 {{ if .Prefix }}    - prefix: "{{ .Prefix }}"{{ end }}
@@ -68,6 +69,7 @@ type DHCP6ServerModel struct {
 	NameServer types.String `tfsdk:"nameserver"`
 	PoolStart  types.String `tfsdk:"pool_start"`
 	PoolEnd    types.String `tfsdk:"pool_end"`
+	LeaseTime  types.Int64  `tfsdk:"lease_time"`
 	LeasesFile types.String `tfsdk:"leases_file"`
 	ConfigFile types.String `tfsdk:"config_file"`
 	PIDFile    types.String `tfsdk:"pid_file"`
@@ -132,6 +134,13 @@ func (r *DHCP6Server) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Description: "DHCP v6 pool last IPv6 address for dynamic allocation",
 				Optional:    false,
 				Required:    true,
+			},
+			"lease_time": schema.Int64Attribute{
+				Description: "DHCPv6 lease time in seconds",
+				MarkdownDescription: undent.Md(`DHCPv6 lease time in seconds. This determines how long a client can use an assigned IPv6 address before needing to renew the lease.
+				Defaults to 3600 seconds (1 hour).`),
+				Optional: true,
+				Computed: true,
 			},
 			"leases_file": schema.StringAttribute{
 				Computed:    true,
@@ -229,6 +238,11 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 	data.ConfigFile = types.StringValue(confPath)
 	data.LeasesFile = types.StringValue(leasesPath)
 
+	// Set default lease time if not specified.
+	if data.LeaseTime.IsNull() || data.LeaseTime.IsUnknown() {
+		data.LeaseTime = types.Int64Value(3600)
+	}
+
 	// If we don't do this mapping and try to directly pass `data` to
 	// template.Execute then that will call field.String() which returns
 	// the value double-quoted.
@@ -239,6 +253,7 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 		NameServer string
 		PoolStart  string
 		PoolEnd    string
+		LeaseTime  int64
 		LeasesFile string
 	}{
 		Interface:  data.Interface.ValueString(),
@@ -247,6 +262,7 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 		NameServer: data.NameServer.ValueString(),
 		PoolStart:  data.PoolStart.ValueString(),
 		PoolEnd:    data.PoolEnd.ValueString(),
+		LeaseTime:  data.LeaseTime.ValueInt64(),
 		LeasesFile: data.LeasesFile.ValueString(),
 	}
 	if err := tmpl.Execute(confFile, td); err != nil {
@@ -332,7 +348,8 @@ func (r *DHCP6Server) Update(ctx context.Context, req resource.UpdateRequest, re
 		!plan.Prefix.Equal(state.Prefix) ||
 		!plan.NameServer.Equal(state.NameServer) ||
 		!plan.PoolStart.Equal(state.PoolStart) ||
-		!plan.PoolEnd.Equal(state.PoolEnd)
+		!plan.PoolEnd.Equal(state.PoolEnd) ||
+		!plan.LeaseTime.Equal(state.LeaseTime)
 
 	if configChanged {
 		resp.Diagnostics.AddError("DHCP6Server Resource Update Error",

@@ -12,4 +12,5 @@ resource "zedamigo_dhcp_server" "test" {
   netmask    = "255.255.255.0"
   pool_start = "172.27.244.100"
   pool_end   = "172.27.244.199"
+  lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
