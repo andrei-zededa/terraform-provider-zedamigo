@@ -34,12 +34,11 @@ server4:
   listen:
     - "%{{ .Interface }}:67"
   plugins:
-    - lease_time: {{ .LeaseTime }}s
     - server_id: {{ .ServerID }}
     - dns: {{ .NameServer }}
     - router: {{ .Router }}
     - netmask: {{ .Netmask }}
-    - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} 180s
+    - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} {{ .LeaseTime }}s
 `
 )
 

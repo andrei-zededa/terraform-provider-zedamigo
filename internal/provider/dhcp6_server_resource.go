@@ -38,9 +38,8 @@ server6:
     # - server_id: <DUID format> <LL address>
     # The supported DUID formats are LL and LLT
     - server_id: LL {{ .ServerID }}
-    - lease_time: {{ .LeaseTime }}s
     - dns: {{ .NameServer }}
-    - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} 180s
+    - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} {{ .LeaseTime }}s
 {{ if .Prefix }}    - prefix: "{{ .Prefix }}"{{ end }}
 `
 )

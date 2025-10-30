@@ -10,24 +10,18 @@ import (
 
 	"github.com/coredhcp/coredhcp/plugins"
 	pl_dns "github.com/coredhcp/coredhcp/plugins/dns"
-	pl_file "github.com/coredhcp/coredhcp/plugins/file"
-	pl_leasetime "github.com/coredhcp/coredhcp/plugins/leasetime"
 	pl_prefix "github.com/coredhcp/coredhcp/plugins/prefix"
 	pl_range "github.com/coredhcp/coredhcp/plugins/range"
-	pl_searchdomains "github.com/coredhcp/coredhcp/plugins/searchdomains"
 	pl_serverid "github.com/coredhcp/coredhcp/plugins/serverid"
 
 	"github.com/sirupsen/logrus"
 )
 
 var desiredPlugins6 = []*plugins.Plugin{
-	&pl_dns.Plugin,
-	&pl_file.Plugin,
-	&pl_leasetime.Plugin,
-	&pl_prefix.Plugin,
-	&pl_range.Plugin,
-	&pl_searchdomains.Plugin,
 	&pl_serverid.Plugin,
+	&pl_dns.Plugin,
+	&pl_range.Plugin,
+	&pl_prefix.Plugin,
 }
 
 func dhcp6ServerMain() {
