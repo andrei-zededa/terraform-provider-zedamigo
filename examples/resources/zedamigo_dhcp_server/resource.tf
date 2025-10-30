@@ -10,7 +10,9 @@ resource "zedamigo_dhcp_server" "test" {
   nameserver = "9.9.9.9"
   router     = "172.27.244.254"
   netmask    = "255.255.255.0"
-  pool_start = "172.27.244.100"
-  pool_end   = "172.27.244.199"
+  pool {
+    start = "172.27.244.100"
+    end   = "172.27.244.199"
+  }
   lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }

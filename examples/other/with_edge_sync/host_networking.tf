@@ -11,8 +11,10 @@ resource "zedamigo_dhcp_server" "DHCP_101" {
   nameserver = "9.9.9.9"
   router     = "10.99.101.1"
   netmask    = "255.255.255.0"
-  pool_start = "10.99.101.70"
-  pool_end   = "10.99.101.79"
+  pool {
+    start = "10.99.101.70"
+    end   = "10.99.101.79"
+  }
 }
 
 resource "zedamigo_tap" "TAP" {

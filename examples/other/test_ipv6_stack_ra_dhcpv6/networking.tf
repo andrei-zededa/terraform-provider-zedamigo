@@ -31,7 +31,9 @@ resource "zedamigo_dhcp6_server" "dhcpv6_server_01" {
   interface  = zedamigo_bridge.BRIDGE_01.name
   server_id  = zedamigo_bridge.BRIDGE_01.mac_address
   nameserver = "2606:4700:4700::1111"
-  pool_start = "2001:db8:113::baad:0"
-  pool_end   = "2001:db8:113::baad:ff"
+  pool {
+    start = "2001:db8:113::baad:0"
+    end   = "2001:db8:113::baad:ff"
+  }
 }
 

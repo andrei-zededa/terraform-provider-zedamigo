@@ -30,8 +30,10 @@ resource "zedamigo_dhcp6_server" "test" {
   server_id  = "aa:bb:cc:dd:ee:ff"
   prefix     = "fd00:abcd:1234::/64"
   nameserver = "2606:4700:4700::1111"
-  pool_start = "fd00:abcd:1234::100"
-  pool_end   = "fd00:abcd:1234::199"
+  pool {
+    start = "fd00:abcd:1234::100"
+    end   = "fd00:abcd:1234::199"
+  }
   lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
 ```
@@ -45,8 +47,7 @@ resource "zedamigo_dhcp6_server" "test" {
 - `nameserver` (String) IPv6 address which will be used as the value for the nameserver/DNS option in the DHCP offer.
 				If a fully working setup is needed then this must be an existing & working DNS resolver.
 				This resource DOES NOT provide DNS resolving.
-- `pool_end` (String) DHCP v6 pool last IPv6 address for dynamic allocation
-- `pool_start` (String) DHCP v6 pool first IPv6 address for dynamic allocation
+- `pool` (Attributes) DHCP v6 address pool configuration for dynamic allocation (see [below for nested schema](#nestedatt--pool))
 - `server_id` (String) MAC address representing the DHCPv6 server ID
 
 ### Optional
@@ -63,3 +64,11 @@ resource "zedamigo_dhcp6_server" "test" {
 - `id` (String) DHCPv6 server resource identifier.
 - `leases_file` (String) The sqlite3 leases file used by this instance of CoreDHCP
 - `pid_file` (String) Process ID file
+
+<a id="nestedatt--pool"></a>
+### Nested Schema for `pool`
+
+Required:
+
+- `end` (String) DHCP v6 pool last IPv6 address for dynamic allocation
+- `start` (String) DHCP v6 pool first IPv6 address for dynamic allocation

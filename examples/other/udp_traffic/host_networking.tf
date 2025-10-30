@@ -11,8 +11,10 @@ resource "zedamigo_dhcp_server" "DHCP_101" {
   nameserver = "9.9.9.9"
   router     = "10.99.101.1"
   netmask    = "255.255.255.0"
-  pool_start = "10.99.101.70"
-  pool_end   = "10.99.101.79"
+  pool {
+    start = "10.99.101.70"
+    end   = "10.99.101.79"
+  }
 }
 
 resource "zedamigo_tap" "TAP_101" {
@@ -36,8 +38,10 @@ resource "zedamigo_dhcp_server" "DHCP_102" {
   nameserver = "9.9.9.9"
   router     = "10.99.102.1"
   netmask    = "255.255.255.0"
-  pool_start = "10.99.102.80"
-  pool_end   = "10.99.102.89"
+  pool {
+    start = "10.99.102.80"
+    end   = "10.99.102.89"
+  }
 }
 
 resource "zedamigo_tap" "TAP_102" {
@@ -61,8 +65,10 @@ resource "zedamigo_dhcp_server" "DHCP_103" {
   nameserver = "9.9.9.9"
   router     = "10.99.103.1"
   netmask    = "255.255.255.0"
-  pool_start = "10.99.103.90"
-  pool_end   = "10.99.103.99"
+  pool {
+    start = "10.99.103.90"
+    end   = "10.99.103.99"
+  }
 }
 
 resource "zedamigo_tap" "TAP_103" {

@@ -59,20 +59,25 @@ type DHCP6Server struct {
 	providerConf *ZedAmigoProviderConfig
 }
 
+// DHCP6PoolModel describes the DHCPv6 pool configuration.
+type DHCP6PoolModel struct {
+	Start types.String `tfsdk:"start"`
+	End   types.String `tfsdk:"end"`
+}
+
 // DHCP6ServerModel describes the resource data model.
 type DHCP6ServerModel struct {
-	ID         types.String `tfsdk:"id"`
-	Interface  types.String `tfsdk:"interface"`
-	ServerID   types.String `tfsdk:"server_id"`
-	Prefix     types.String `tfsdk:"prefix"`
-	NameServer types.String `tfsdk:"nameserver"`
-	PoolStart  types.String `tfsdk:"pool_start"`
-	PoolEnd    types.String `tfsdk:"pool_end"`
-	LeaseTime  types.Int64  `tfsdk:"lease_time"`
-	LeasesFile types.String `tfsdk:"leases_file"`
-	ConfigFile types.String `tfsdk:"config_file"`
-	PIDFile    types.String `tfsdk:"pid_file"`
-	State      types.String `tfsdk:"state"`
+	ID         types.String     `tfsdk:"id"`
+	Interface  types.String     `tfsdk:"interface"`
+	ServerID   types.String     `tfsdk:"server_id"`
+	Prefix     types.String     `tfsdk:"prefix"`
+	NameServer types.String     `tfsdk:"nameserver"`
+	Pool       *DHCP6PoolModel  `tfsdk:"pool"`
+	LeaseTime  types.Int64      `tfsdk:"lease_time"`
+	LeasesFile types.String     `tfsdk:"leases_file"`
+	ConfigFile types.String     `tfsdk:"config_file"`
+	PIDFile    types.String     `tfsdk:"pid_file"`
+	State      types.String     `tfsdk:"state"`
 }
 
 func (r *DHCP6Server) getResourceDir(id string) string {
@@ -124,15 +129,19 @@ func (r *DHCP6Server) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Optional: false,
 				Required: true,
 			},
-			"pool_start": schema.StringAttribute{
-				Description: "DHCP v6 pool first IPv6 address for dynamic allocation",
-				Optional:    false,
+			"pool": schema.SingleNestedAttribute{
+				Description: "DHCP v6 address pool configuration for dynamic allocation",
 				Required:    true,
-			},
-			"pool_end": schema.StringAttribute{
-				Description: "DHCP v6 pool last IPv6 address for dynamic allocation",
-				Optional:    false,
-				Required:    true,
+				Attributes: map[string]schema.Attribute{
+					"start": schema.StringAttribute{
+						Description: "DHCP v6 pool first IPv6 address for dynamic allocation",
+						Required:    true,
+					},
+					"end": schema.StringAttribute{
+						Description: "DHCP v6 pool last IPv6 address for dynamic allocation",
+						Required:    true,
+					},
+				},
 			},
 			"lease_time": schema.Int64Attribute{
 				Description: "DHCPv6 lease time in seconds",
@@ -242,6 +251,13 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 		data.LeaseTime = types.Int64Value(3600)
 	}
 
+	// Validate pool is not nil
+	if data.Pool == nil {
+		resp.Diagnostics.AddError("DHCP6Server Resource Error",
+			"Pool configuration is required but was not provided")
+		return
+	}
+
 	// If we don't do this mapping and try to directly pass `data` to
 	// template.Execute then that will call field.String() which returns
 	// the value double-quoted.
@@ -259,8 +275,8 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 		ServerID:   data.ServerID.ValueString(),
 		Prefix:     data.Prefix.ValueString(),
 		NameServer: data.NameServer.ValueString(),
-		PoolStart:  data.PoolStart.ValueString(),
-		PoolEnd:    data.PoolEnd.ValueString(),
+		PoolStart:  data.Pool.Start.ValueString(),
+		PoolEnd:    data.Pool.End.ValueString(),
 		LeaseTime:  data.LeaseTime.ValueInt64(),
 		LeasesFile: data.LeasesFile.ValueString(),
 	}
@@ -340,14 +356,21 @@ func (r *DHCP6Server) Update(ctx context.Context, req resource.UpdateRequest, re
 
 	d := r.getResourceDir(state.ID.ValueString())
 
+	// Validate pool is not nil
+	if plan.Pool == nil || state.Pool == nil {
+		resp.Diagnostics.AddError("DHCP6Server Resource Update Error",
+			"Pool configuration is required but was not provided")
+		return
+	}
+
 	// Check if only the state field changed
 	stateChanged := !plan.State.Equal(state.State)
+	poolChanged := !plan.Pool.Start.Equal(state.Pool.Start) || !plan.Pool.End.Equal(state.Pool.End)
 	configChanged := !plan.Interface.Equal(state.Interface) ||
 		!plan.ServerID.Equal(state.ServerID) ||
 		!plan.Prefix.Equal(state.Prefix) ||
 		!plan.NameServer.Equal(state.NameServer) ||
-		!plan.PoolStart.Equal(state.PoolStart) ||
-		!plan.PoolEnd.Equal(state.PoolEnd) ||
+		poolChanged ||
 		!plan.LeaseTime.Equal(state.LeaseTime)
 
 	if configChanged {

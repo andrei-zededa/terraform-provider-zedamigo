@@ -9,7 +9,9 @@ resource "zedamigo_dhcp6_server" "test" {
   server_id  = "aa:bb:cc:dd:ee:ff"
   prefix     = "fd00:abcd:1234::/64"
   nameserver = "2606:4700:4700::1111"
-  pool_start = "fd00:abcd:1234::100"
-  pool_end   = "fd00:abcd:1234::199"
+  pool {
+    start = "fd00:abcd:1234::100"
+    end   = "fd00:abcd:1234::199"
+  }
   lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
