@@ -19,9 +19,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/shirou/gopsutil/v4/process"
@@ -129,20 +131,6 @@ func (r *DHCP6Server) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Optional: false,
 				Required: true,
 			},
-			"pool": schema.SingleNestedAttribute{
-				Description: "DHCP v6 address pool configuration for dynamic allocation",
-				Required:    true,
-				Attributes: map[string]schema.Attribute{
-					"start": schema.StringAttribute{
-						Description: "DHCP v6 pool first IPv6 address for dynamic allocation",
-						Required:    true,
-					},
-					"end": schema.StringAttribute{
-						Description: "DHCP v6 pool last IPv6 address for dynamic allocation",
-						Required:    true,
-					},
-				},
-			},
 			"lease_time": schema.Int64Attribute{
 				Description: "DHCPv6 lease time in seconds",
 				MarkdownDescription: undent.Md(`DHCPv6 lease time in seconds. This determines how long a client can use an assigned IPv6 address before needing to renew the lease.
@@ -168,6 +156,24 @@ func (r *DHCP6Server) Schema(ctx context.Context, req resource.SchemaRequest, re
 				Description: "Desired state of the DHCPv6 server daemon",
 				MarkdownDescription: undent.Md(`Desired state of the DHCPv6 server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.`),
+			},
+		},
+		Blocks: map[string]schema.Block{
+			"pool": schema.SingleNestedBlock{
+				Description: "DHCP v6 address pool configuration for dynamic allocation",
+				Validators: []validator.Object{
+					objectvalidator.IsRequired(),
+				},
+				Attributes: map[string]schema.Attribute{
+					"start": schema.StringAttribute{
+						Description: "DHCP v6 pool first IPv6 address for dynamic allocation",
+						Required:    true,
+					},
+					"end": schema.StringAttribute{
+						Description: "DHCP v6 pool last IPv6 address for dynamic allocation",
+						Required:    true,
+					},
+				},
 			},
 		},
 	}

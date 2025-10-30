@@ -47,13 +47,13 @@ resource "zedamigo_dhcp6_server" "test" {
 - `nameserver` (String) IPv6 address which will be used as the value for the nameserver/DNS option in the DHCP offer.
 				If a fully working setup is needed then this must be an existing & working DNS resolver.
 				This resource DOES NOT provide DNS resolving.
-- `pool` (Attributes) DHCP v6 address pool configuration for dynamic allocation (see [below for nested schema](#nestedatt--pool))
 - `server_id` (String) MAC address representing the DHCPv6 server ID
 
 ### Optional
 
 - `lease_time` (Number) DHCPv6 lease time in seconds. This determines how long a client can use an assigned IPv6 address before needing to renew the lease.
 				Defaults to 3600 seconds (1 hour).
+- `pool` (Block, Optional) DHCP v6 address pool configuration for dynamic allocation (see [below for nested schema](#nestedblock--pool))
 - `prefix` (String) Prefix delegation
 - `state` (String) Desired state of the DHCPv6 server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
@@ -65,7 +65,7 @@ resource "zedamigo_dhcp6_server" "test" {
 - `leases_file` (String) The sqlite3 leases file used by this instance of CoreDHCP
 - `pid_file` (String) Process ID file
 
-<a id="nestedatt--pool"></a>
+<a id="nestedblock--pool"></a>
 ### Nested Schema for `pool`
 
 Required:

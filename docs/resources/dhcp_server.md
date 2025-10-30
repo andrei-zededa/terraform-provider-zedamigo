@@ -49,7 +49,6 @@ resource "zedamigo_dhcp_server" "test" {
 				If a fully working setup is needed then this must be an existing & working DNS resolver.
 				This resource DOES NOT provide DNS resolving.
 - `netmask` (String) Netmask for the DHCP offers
-- `pool` (Attributes) DHCP v4 address pool configuration for dynamic allocation (see [below for nested schema](#nestedatt--pool))
 - `router` (String) IPv4 address which will be used as the value for the router option in the DHCP offer.
 				If a fully working setup is needed then the host must be configured to route (do NAT, etc.) correctly.
 				This resource DOES NOT configure the host.
@@ -59,6 +58,7 @@ resource "zedamigo_dhcp_server" "test" {
 
 - `lease_time` (Number) DHCP lease time in seconds. This determines how long a client can use an assigned IP address before needing to renew the lease.
 				Defaults to 3600 seconds (1 hour).
+- `pool` (Block, Optional) DHCP v4 address pool configuration for dynamic allocation (see [below for nested schema](#nestedblock--pool))
 - `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
 
@@ -69,7 +69,7 @@ resource "zedamigo_dhcp_server" "test" {
 - `leases_file` (String) The sqlite3 leases file used by this instance of CoreDHCP
 - `pid_file` (String) Process ID file
 
-<a id="nestedatt--pool"></a>
+<a id="nestedblock--pool"></a>
 ### Nested Schema for `pool`
 
 Required:
