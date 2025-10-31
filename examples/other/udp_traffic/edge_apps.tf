@@ -196,6 +196,34 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       privateip    = false
     }
 
+    interfaces {
+      directattach = false
+      name         = "app_eth3"
+      optional     = false
+      privateip    = false
+    }
+
+    interfaces {
+      directattach = false
+      name         = "app_eth4"
+      optional     = false
+      privateip    = false
+    }
+
+    interfaces {
+      directattach = false
+      name         = "app_eth5"
+      optional     = false
+      privateip    = false
+    }
+
+    interfaces {
+      directattach = false
+      name         = "app_eth6"
+      optional     = false
+      privateip    = false
+    }
+
     owner {
       email   = "andrei@zededa.com"
       user    = "Andrei AT Zededa"

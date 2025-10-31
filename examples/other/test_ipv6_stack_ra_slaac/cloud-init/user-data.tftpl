@@ -6,13 +6,19 @@ growpart:
   devices: ['/']
   ignore_growroot_disabled: false
 
+# Grow the filesystem after growing the partition.
+runcmd:
+  # On Ubuntu there is a `/dev/root` symlink, but for example on Debian that
+  # doesn't exist.
+  - 'resize2fs $(findmnt -n -o source /)'
+
 # Create an user with SSH authentication.
 users:
-  - name: ####USERNAME####
+  - name: ${user}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
-      - ####SSH_PUB_KEY####
+      - ${user_ssh_pub_key} 
 
 # Remove all users except just the one creted and required system users.
 userdel:
@@ -38,7 +44,7 @@ preserve_users:
   - _apt
   - nobody
   - systemd-coredump
-  - ####USERNAME####
+  - ${user} 
 
 # Set password authentication to false for enhanced security.
 ssh_pwauth: false
@@ -59,7 +65,6 @@ packages:
   - jq
   - net-tools
   - dnsutils
-  - python3-scapy
   
 # Update the package list and upgrade all packages on first boot.
 package_update: true
@@ -76,42 +81,20 @@ write_files:
   - path: /etc/hosts
     content: |
       127.0.0.1 localhost
-      127.0.1.1 $zri.system.edge-instance.name
+      127.0.1.1 ${hostname}.${domainname} ${hostname}
       ::1 localhost ip6-localhost ip6-loopback
       ff02::1 ip6-allnodes
       ff02::2 ip6-allrouters
+      
+      # Custom entries
+%{ for host in custom_hosts ~}
+      ${host.ipv4_addr} ${host.name}%{ if try(host.aliases, "") != "" } ${try(host.aliases, "")}%{ endif }
+%{ endfor ~}
     permissions: '0644'
     owner: root:root
 
-  # Embed the netplan config instead of having a separate network-config.
-  - path: /etc/netplan/01-network-config.yaml
-    content: |
-      network:
-       version: 2
-       ethernets:
-         allens:
-           match:
-             name: en*
-           dhcp4: true
-           dhcp6: true
-         alleths:
-           match:
-             name: eth*
-           dhcp4: true
-           dhcp6: true
-    permissions: '0644'
-    owner: root:root
-
-hostname: $zri.system.edge-instance.name
-fqdn: $zri.system.edge-instance.name
-
-runcmd:
-  # On Ubuntu there is a `/dev/root` symlink, but for example on Debian that
-  # doesn't exist. Grow the filesystem after growing the partition.
-  - 'resize2fs $(findmnt -n -o source /)'
-  - rm /etc/netplan/50-cloud-init.yaml # Because we embedded the netplan config above instead of having a separate network-config.
-  - netplan generate
-  - netplan apply
+hostname: ${hostname}
+fqdn: ${hostname}.${domainname}
 
 # Final message on login screen
 final_message: "System is ready after $UPTIME seconds."

@@ -27,7 +27,7 @@ import (
 
 const (
 	edgeNodesDir = "edge_nodes"
-	nic0Fmt      = "user,id=usernet0,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:10022,hostfwd=tcp::%d-:10080,model=virtio"
+	nic0Fmt      = "user,id=usernet0,ipv6=off,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:10022,hostfwd=tcp::%d-:10080,model=virtio"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.

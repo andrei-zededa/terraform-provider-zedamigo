@@ -2,12 +2,14 @@ terraform {
   required_providers {
     zedamigo = {
       source  = "localhost/andrei-zededa/zedamigo"
-      version = ">= 0.5.0, < 1.0.0"
+      version = ">= 0.6.0, < 1.0.0"
     }
 
     zedcloud = {
-      source  = "zededa/zedcloud"
-      version = ">= 2.4.0"
+      source = "zededa/zedcloud"
+      # Actually we need the next version for edge-node interface ZTYPE support,
+      # or a locally built version from commit 475d2c3 .
+      version = ">= 2.5.0"
     }
   }
 }

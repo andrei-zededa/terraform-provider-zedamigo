@@ -31,8 +31,11 @@ resource "zedamigo_dhcp_server" "test" {
   nameserver = "9.9.9.9"
   router     = "172.27.244.254"
   netmask    = "255.255.255.0"
-  pool_start = "172.27.244.100"
-  pool_end   = "172.27.244.199"
+  pool {
+    start = "172.27.244.100"
+    end   = "172.27.244.199"
+  }
+  lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
 ```
 
@@ -46,12 +49,18 @@ resource "zedamigo_dhcp_server" "test" {
 				If a fully working setup is needed then this must be an existing & working DNS resolver.
 				This resource DOES NOT provide DNS resolving.
 - `netmask` (String) Netmask for the DHCP offers
-- `pool_end` (String) DHCP v4 pool last IPv4 address for dynamic allocation
-- `pool_start` (String) DHCP v4 pool first IPv4 address for dynamic allocation
 - `router` (String) IPv4 address which will be used as the value for the router option in the DHCP offer.
 				If a fully working setup is needed then the host must be configured to route (do NAT, etc.) correctly.
 				This resource DOES NOT configure the host.
 - `server_id` (String) IPv4 address representing the DHCP server ID
+
+### Optional
+
+- `lease_time` (Number) DHCP lease time in seconds. This determines how long a client can use an assigned IP address before needing to renew the lease.
+				Defaults to 3600 seconds (1 hour).
+- `pool` (Block, Optional) DHCP v4 address pool configuration for dynamic allocation (see [below for nested schema](#nestedblock--pool))
+- `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
+				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
 
 ### Read-Only
 
@@ -59,3 +68,11 @@ resource "zedamigo_dhcp_server" "test" {
 - `id` (String) DHCP server resource identifier.
 - `leases_file` (String) The sqlite3 leases file used by this instance of CoreDHCP
 - `pid_file` (String) Process ID file
+
+<a id="nestedblock--pool"></a>
+### Nested Schema for `pool`
+
+Required:
+
+- `end` (String) DHCP v4 pool last IPv4 address for dynamic allocation
+- `start` (String) DHCP v4 pool first IPv4 address for dynamic allocation

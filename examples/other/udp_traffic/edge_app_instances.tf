@@ -46,28 +46,76 @@ resource "zedcloud_network_instance" "NET_INSTANCES_LOCAL_APP_NAT" {
   }
 }
 
-resource "zedcloud_network_instance" "NET_INSTANCES_LOCAL" {
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_3" {
   for_each = local.nodes
 
-  name      = "ni_local_eth2_${each.value.name}_${var.config_suffix}"
-  title     = "TF created instance local (port = eth2) for ${each.value.name}"
-  kind      = "NETWORK_INSTANCE_KIND_LOCAL"
-  type      = "NETWORK_INSTANCE_DHCP_TYPE_V4"
-  device_id = each.value.id
-
-  port = "eth2"
-}
-
-resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH" {
-  for_each = local.nodes
-
-  name      = "ni_switch_eth3_${each.value.name}_${var.config_suffix}"
-  title     = "TF created instance switch (port = eth3) for ${each.value.name}"
+  name      = "ni_switch_port3_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port3) for ${each.value.name}"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = each.value.id
 
-  port = "eth3"
+  port = "port3"
+}
+
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_4" {
+  for_each = local.nodes
+
+  name      = "ni_switch_port4_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port4) for ${each.value.name}"
+  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
+  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  device_id = each.value.id
+
+  port = "port4"
+}
+
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_5" {
+  for_each = local.nodes
+
+  name      = "ni_switch_port5_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port5) for ${each.value.name}"
+  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
+  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  device_id = each.value.id
+
+  port = "port5"
+}
+
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_6" {
+  for_each = local.nodes
+
+  name      = "ni_switch_port6_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port6) for ${each.value.name}"
+  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
+  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  device_id = each.value.id
+
+  port = "port6"
+}
+
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_7" {
+  for_each = local.nodes
+
+  name      = "ni_switch_port7_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port7) for ${each.value.name}"
+  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
+  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  device_id = each.value.id
+
+  port = "port7"
+}
+
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_8" {
+  for_each = local.nodes
+
+  name      = "ni_switch_port8_${each.value.name}_${var.config_suffix}"
+  title     = "TF created instance switch (port = port8) for ${each.value.name}"
+  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
+  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  device_id = each.value.id
+
+  port = "port8"
 }
 
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
@@ -148,13 +196,37 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[1].name
     intforder   = 2
     privateip   = false
-    netinstname = zedcloud_network_instance.NET_INSTANCES_LOCAL[each.key].name
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_3[each.key].name
   }
   interfaces {
     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[2].name
     intforder   = 3
     privateip   = false
-    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH[each.key].name
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_4[each.key].name
+  }
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[3].name
+    intforder   = 4
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_5[each.key].name
+  }
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[4].name
+    intforder   = 5
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_6[each.key].name
+  }
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[5].name
+    intforder   = 6
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_7[each.key].name
+  }
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[6].name
+    intforder   = 7
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_8[each.key].name
   }
 }
 

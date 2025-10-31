@@ -22,6 +22,7 @@ import (
 
 const (
 	installedNodesDir = "installed_nodes"
+	nic0FmtInstall    = "user,id=usernet0,ipv6=off,model=virtio"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -239,10 +240,10 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		"-cpu", "host", "-smp", "4,cores=2",
 		"-device", "intel-iommu,intremap=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
-		"-net", "user", "-net", "nic,model=virtio",
 		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
+		"-nic", nic0FmtInstall,
 	}...)
 
 	disks := []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i)}

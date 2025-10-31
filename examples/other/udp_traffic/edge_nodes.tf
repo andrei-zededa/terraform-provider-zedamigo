@@ -4,10 +4,49 @@ variable "onboarding_key" {
   default     = "5d0767ee-0547-4569-b530-387e526f8cb9"
 }
 
-resource "zedcloud_network" "edge_node_as_dhcp_client" {
-  name  = "edge_node_as_dhcp_client_${var.config_suffix}"
-  title = "edge_node_as_dhcp_client"
+resource "zedcloud_network" "netobj_dual_ipv4_pref" {
+  name  = "netobj_dual_ipv4_pref_${var.config_suffix}"
+  title = "netobj_dual_ipv4_pref"
   kind  = "NETWORK_KIND_V4"
+
+  project_id = zedcloud_project.PROJECT.id
+
+  ip {
+    dhcp = "NETWORK_DHCP_TYPE_CLIENT"
+  }
+  mtu = 1500
+}
+
+resource "zedcloud_network" "netobj_dual_ipv6_pref" {
+  name  = "netobj_dual_ipv6_pref_${var.config_suffix}"
+  title = "netobj_dual_ipv6_pref"
+  kind  = "NETWORK_KIND_V6"
+
+  project_id = zedcloud_project.PROJECT.id
+
+  ip {
+    dhcp = "NETWORK_DHCP_TYPE_CLIENT"
+  }
+  mtu = 1500
+}
+
+resource "zedcloud_network" "netobj_ipv4_only" {
+  name  = "netobj_ipv4_only_${var.config_suffix}"
+  title = "netobj_ipv4_only"
+  kind  = "NETWORK_KIND_V4_ONLY"
+
+  project_id = zedcloud_project.PROJECT.id
+
+  ip {
+    dhcp = "NETWORK_DHCP_TYPE_CLIENT"
+  }
+  mtu = 1500
+}
+
+resource "zedcloud_network" "netobj_ipv6_only" {
+  name  = "netobj_ipv6_only_${var.config_suffix}"
+  title = "netobj_ipv6_only"
+  kind  = "NETWORK_KIND_V6_ONLY"
 
   project_id = zedcloud_project.PROJECT.id
 
@@ -37,43 +76,80 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intfname   = "port0"
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
-    netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH"
-    tags       = {}
+    netname    = zedcloud_network.netobj_dual_ipv4_pref.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
   }
 
   interfaces {
     intfname   = "port1"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
-    netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH"
-    tags       = {}
+    netname    = zedcloud_network.netobj_dual_ipv4_pref.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
   }
 
   interfaces {
     intfname   = "port2"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
-    netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH"
-    tags       = {}
+    netname    = zedcloud_network.netobj_ipv4_only.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
   }
 
   interfaces {
     intfname   = "port3"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
-    ztype      = "IO_TYPE_ETH"
-    tags       = {}
+    netname    = zedcloud_network.netobj_dual_ipv6_pref.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
   }
 
   interfaces {
     intfname   = "port4"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     cost       = 0
-    ztype      = "IO_TYPE_ETH"
-    tags       = {}
+    netname    = zedcloud_network.netobj_ipv6_only.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
+  }
+
+  interfaces {
+    intfname   = "port5"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
+    cost       = 0
+    netname    = zedcloud_network.netobj_dual_ipv6_pref.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
+  }
+
+  interfaces {
+    intfname   = "port6"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
+    cost       = 0
+    netname    = zedcloud_network.netobj_ipv6_only.name
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
+  }
+
+  interfaces {
+    intfname   = "port7"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
+    cost       = 0
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
+  }
+
+  interfaces {
+    intfname   = "port8"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
+    #### intf_usage = "ADAPTER_USAGE_VLANS_ONLY"
+    cost = 0
+    # ztype      = "IO_TYPE_ETH" # Not supported in 2.5.0, we need the next version.
+    tags = {}
   }
 
   tags = {}
@@ -174,13 +250,21 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
     #
     "-device", "pcie-root-port,id=pcie1,bus=pcie.0,addr=0x10",
     "-device", "pci-bridge,id=pci1,bus=pcie1,chassis_nr=1",
-    "-device", "e1000,netdev=vmnet1,mac=8c:84:74:10:00:00,bus=pci1,addr=0x0",
-    "-device", "e1000,netdev=vmnet2,mac=8c:84:74:10:00:01,bus=pci1,addr=0x1",
-    "-device", "e1000,netdev=vmnet3,mac=8c:84:74:10:00:02,bus=pci1,addr=0x2",
-    "-device", "e1000,netdev=vmnet4,mac=8c:84:74:10:00:03,bus=pci1,addr=0x3",
+    "-device", "e1000,netdev=vmnet1,mac=8c:84:74:10:00:01,bus=pci1,addr=0x0",
+    "-device", "e1000,netdev=vmnet2,mac=8c:84:74:10:00:02,bus=pci1,addr=0x1",
+    "-device", "e1000,netdev=vmnet3,mac=8c:84:74:10:00:03,bus=pci1,addr=0x2",
+    "-device", "e1000,netdev=vmnet4,mac=8c:84:74:10:00:04,bus=pci1,addr=0x3",
+    "-device", "e1000,netdev=vmnet5,mac=8c:84:74:10:00:05,bus=pci1,addr=0x4",
+    "-device", "e1000,netdev=vmnet6,mac=8c:84:74:10:00:06,bus=pci1,addr=0x5",
+    "-device", "e1000,netdev=vmnet7,mac=8c:84:74:10:00:07,bus=pci1,addr=0x6",
+    "-device", "e1000,netdev=vmnet8,mac=8c:84:74:10:00:08,bus=pci1,addr=0x7",
     "-netdev", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no",
     "-netdev", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_102.name},script=no,downscript=no",
     "-netdev", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_103.name},script=no,downscript=no",
     "-netdev", "tap,id=vmnet4,ifname=${zedamigo_tap.TAP_104.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet5,ifname=${zedamigo_tap.TAP_105.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet6,ifname=${zedamigo_tap.TAP_106.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet7,ifname=${zedamigo_tap.TAP_107.name},script=no,downscript=no",
+    "-netdev", "tap,id=vmnet8,ifname=${zedamigo_tap.TAP_108.name},script=no,downscript=no",
   ]
 }

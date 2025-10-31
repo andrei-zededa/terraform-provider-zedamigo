@@ -50,6 +50,15 @@ var (
 	// DHCP server mode CLI flags.
 	dhcpConfig = flag.String("ds.config", "", "DHCP server: config file")
 
+	dhcp6Server = flag.Bool("dhcp6-server", false, "Run the binary in 'DHCPv6 server' mode")
+	// DHCPv6 server mode CLI flags.
+	dhcp6Config = flag.String("d6s.config", "", "DHCPv6 server: config file")
+
+	radv = flag.Bool("radv", false, "Run the binary in 'Router Advertisement' mode")
+	// Router Advertisement mode CLI flags.
+	radvConfig = flag.String("radv.config", "", "RADV: config file")
+	radvWait   = flag.Bool("radv.wait", false, "RADV: Wait for the interface to become available")
+
 	httpServer = flag.Bool("http-server", false, "Run the binary in 'HTTP server' mode")
 	// HTTP server mode CLI flags.
 	httpListen    = flag.String("hs.listen", ":8080", "HTTP server: listen address (host:port)")
@@ -102,12 +111,40 @@ func main() {
 
 		// Validate CLI flags.
 		if *dhcpConfig == "" {
-			fmt.Fprintf(os.Stderr, "Error: In 'DHCP server' mode MUST specify either `-ds.config``.\n")
+			fmt.Fprintf(os.Stderr, "Error: In 'DHCP server' mode MUST specify `-ds.config``.\n")
 			flag.Usage()
 			os.Exit(1)
 		}
 
 		dhcpServerMain()
+		os.Exit(0)
+	}
+
+	if *dhcp6Server {
+		// Run in "DHCPv6 server" mode and NOT the normal terraform provider mode.
+
+		// Validate CLI flags.
+		if *dhcp6Config == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'DHCPv6 server' mode MUST specify `-d6s.config``.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		dhcp6ServerMain()
+		os.Exit(0)
+	}
+
+	if *radv {
+		// Run in "Router Advertisement" mode and NOT the normal terraform provider mode.
+
+		// Validate CLI flags.
+		if *radvConfig == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'Router Advertisement' mode MUST specify `-radv.config`.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		radvMain()
 		os.Exit(0)
 	}
 
