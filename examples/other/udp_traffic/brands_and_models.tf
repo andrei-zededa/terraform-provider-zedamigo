@@ -84,10 +84,70 @@ resource "zedcloud_model" "QEMU_VM" {
     logicallabel = "port4"
     phyaddrs = {
       Ifname  = "eth4" # Matching just on PciLong doesn't work !
-      PciLong = "0002:02.0"
+      PciLong = "0002:03.0"
     }
     phylabel     = "eth4"
     usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage_policy = {}
+    ztype        = "IO_TYPE_ETH"
+  }
+
+  io_member_list {
+    assigngrp    = "group5"
+    cbattr       = {}
+    cost         = 0
+    logicallabel = "port5"
+    phyaddrs = {
+      Ifname  = "eth5" # Matching just on PciLong doesn't work !
+      PciLong = "0002:04.0"
+    }
+    phylabel     = "eth5"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage_policy = {}
+    ztype        = "IO_TYPE_ETH"
+  }
+
+  io_member_list {
+    assigngrp    = "group6"
+    cbattr       = {}
+    cost         = 0
+    logicallabel = "port6"
+    phyaddrs = {
+      Ifname  = "eth6" # Matching just on PciLong doesn't work !
+      PciLong = "0002:05.0"
+    }
+    phylabel     = "eth6"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage_policy = {}
+    ztype        = "IO_TYPE_ETH"
+  }
+
+  io_member_list {
+    assigngrp    = "group7"
+    cbattr       = {}
+    cost         = 0
+    logicallabel = "port7"
+    phyaddrs = {
+      Ifname  = "eth7" # Matching just on PciLong doesn't work !
+      PciLong = "0002:06.0"
+    }
+    phylabel     = "eth7"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage_policy = {}
+    ztype        = "IO_TYPE_ETH"
+  }
+  io_member_list {
+    assigngrp    = "group8"
+    cbattr       = {}
+    cost         = 0
+    logicallabel = "port8"
+    phyaddrs = {
+      Ifname  = "eth8" # Matching just on PciLong doesn't work !
+      PciLong = "0002:07.0"
+    }
+    phylabel = "eth8"
+    usage    = "ADAPTER_USAGE_APP_SHARED"
+    #### usage        = "ADAPTER_USAGE_VLANS_ONLY"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
