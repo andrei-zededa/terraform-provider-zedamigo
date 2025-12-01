@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,7 +51,7 @@ type EdgeNodeModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	Mem              types.String `tfsdk:"mem"`
-	CPUs             types.String `tfsdk:"cpus"`
+	CPUs             types.Int64  `tfsdk:"cpus"`
 	SerialNo         types.String `tfsdk:"serial_no"`
 	Nic0             types.String `tfsdk:"nic0"`
 	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
@@ -69,6 +70,7 @@ type EdgeNodeModel struct {
 	VMRunning        types.Bool   `tfsdk:"vm_running"`
 	SSHPort          types.Int32  `tfsdk:"ssh_port"`
 	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
+	CPUPins          types.List   `tfsdk:"cpu_pins"`
 }
 
 func (r *EdgeNode) getResourceDir(id string) string {
@@ -106,7 +108,7 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:            true,
 				Required:            false,
 			},
-			"cpus": schema.StringAttribute{
+			"cpus": schema.Int64Attribute{
 				Description:         "Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.",
 				MarkdownDescription: "Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.",
 				Optional:            true,
@@ -231,6 +233,17 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:    true,
 				Required:    false,
 			},
+			"cpu_pins": schema.ListAttribute{
+				Description: "List of host CPU IDs to pin VM vCPUs to. Must match CPU count.",
+				MarkdownDescription: undent.Md(`
+				List of host CPU core IDs to pin the VM's vCPUs to. When specified,
+				the length must equal the number of CPUs. For example, with 4 CPUs
+				and cpu_pins = [0, 2, 4, 6], vCPU 0 pins to host core 0, vCPU 1 to
+				core 2, etc. Requires QEMU to start with debug-threads enabled.`),
+				ElementType: types.Int64Type,
+				Optional:    true,
+				Required:    false,
+			},
 		},
 	}
 }
@@ -252,6 +265,117 @@ func (r *EdgeNode) Configure(ctx context.Context, req resource.ConfigureRequest,
 	}
 
 	r.providerConf = conf
+}
+
+// getCPUThreadIDs reads /proc filesystem to find QEMU vCPU thread IDs.
+// Returns a map[cpuNum]threadID for threads named "CPU N/KVM".
+func getCPUThreadIDs(qemuPID int, numCPUs int) (map[int]int, error) {
+	taskDir := fmt.Sprintf("/proc/%d/task", qemuPID)
+
+	entries, err := os.ReadDir(taskDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read task directory: %w", err)
+	}
+
+	cpuThreads := make(map[int]int)
+
+	for _, entry := range entries {
+		tid := entry.Name()
+		commPath := filepath.Join(taskDir, tid, "comm")
+
+		commBytes, err := os.ReadFile(commPath)
+		if err != nil {
+			continue // Thread may have exited
+		}
+
+		comm := strings.TrimSpace(string(commBytes))
+
+		// Match "CPU N/KVM" pattern
+		if strings.HasPrefix(comm, "CPU ") && strings.HasSuffix(comm, "/KVM") {
+			cpuNumStr := strings.TrimPrefix(comm, "CPU ")
+			cpuNumStr = strings.TrimSuffix(cpuNumStr, "/KVM")
+
+			cpuNum, err := strconv.Atoi(cpuNumStr)
+			if err != nil {
+				continue
+			}
+
+			tidInt, err := strconv.Atoi(tid)
+			if err != nil {
+				continue
+			}
+
+			cpuThreads[cpuNum] = tidInt
+		}
+	}
+
+	if len(cpuThreads) != numCPUs {
+		return cpuThreads, fmt.Errorf("expected %d CPU threads, found %d", numCPUs, len(cpuThreads))
+	}
+
+	return cpuThreads, nil
+}
+
+// pinCPUThreads pins QEMU vCPU threads to host CPU cores using taskset.
+func (r *EdgeNode) pinCPUThreads(ctx context.Context, qemuPID int, cpuPins []int64, numCPUs int, logPath string) error {
+	// Wait for QEMU threads to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Retry logic: threads may take time to appear
+	var cpuThreads map[int]int
+	var err error
+	for i := 0; i < 10; i++ {
+		cpuThreads, err = getCPUThreadIDs(qemuPID, numCPUs)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to find CPU threads after retries: %w", err)
+	}
+
+	// Pin each vCPU thread to corresponding host CPU
+	for cpuNum := 0; cpuNum < numCPUs; cpuNum++ {
+		threadID, ok := cpuThreads[cpuNum]
+		if !ok {
+			return fmt.Errorf("CPU %d thread not found", cpuNum)
+		}
+
+		hostCPU := cpuPins[cpuNum]
+
+		// Build taskset command
+		tasksetArgs := []string{
+			"-cp",
+			fmt.Sprintf("%d", hostCPU),
+			fmt.Sprintf("%d", threadID),
+		}
+
+		if r.providerConf.UseSudo {
+			args := append([]string{r.providerConf.Taskset}, tasksetArgs...)
+			_, err = cmd.Run(logPath, r.providerConf.Sudo, args...)
+		} else {
+			_, err = cmd.Run(logPath, r.providerConf.Taskset, tasksetArgs...)
+		}
+
+		if err != nil {
+			tflog.Warn(ctx, "Failed to pin CPU thread", map[string]any{
+				"cpu_num":   cpuNum,
+				"thread_id": threadID,
+				"host_cpu":  hostCPU,
+				"error":     err,
+			})
+		} else {
+			tflog.Debug(ctx, "Pinned CPU thread", map[string]any{
+				"cpu_num":   cpuNum,
+				"thread_id": threadID,
+				"host_cpu":  hostCPU,
+			})
+		}
+	}
+
+	return nil
 }
 
 func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -352,14 +476,14 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	if !data.Mem.IsNull() {
 		mem = data.Mem.ValueString()
 	}
-	cpus := "4"
+	cpus := int64(4)
 	if !data.CPUs.IsNull() {
-		cpus = data.CPUs.ValueString()
+		cpus = data.CPUs.ValueInt64()
 	}
 
 	qemuArgs = append(qemuArgs, []string{
 		"-m", mem,
-		"-cpu", "host", "-smp", cpus,
+		"-cpu", "host", "-smp", fmt.Sprintf("%d", cpus),
 		"-device", "intel-iommu,intremap=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
 		// "-smbios", fmt.Sprintf("type=1,serial=%s", data.SerialNo.ValueString()),
@@ -368,6 +492,11 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-qmp", data.QmpSocket.ValueString(),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
+
+	// Enable thread naming for CPU pinning if configured
+	if !data.CPUPins.IsNull() && !data.CPUPins.IsUnknown() {
+		qemuArgs = append(qemuArgs, "-global", "debug-threads=on")
+	}
 
 	nic0 := fmt.Sprintf(nic0Fmt, data.SSHPort.ValueInt32(),
 		data.SSHPort.ValueInt32()+1, data.SSHPort.ValueInt32()+2)
@@ -467,6 +596,44 @@ set -eu;
 	}
 
 	tflog.Trace(ctx, "Edge Node Resource created succesfully")
+
+	// Apply CPU pinning if configured
+	if !data.CPUPins.IsNull() && !data.CPUPins.IsUnknown() {
+		var cpuPins []int64
+		diags := data.CPUPins.ElementsAs(ctx, &cpuPins, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		// Validate list length matches CPU count
+		numCPUs := int(cpus)
+		if len(cpuPins) != numCPUs {
+			resp.Diagnostics.AddError("CPU Pins Validation Error",
+				fmt.Sprintf("cpu_pins length (%d) must match cpus (%d)", len(cpuPins), numCPUs))
+			return
+		}
+
+		// Read QEMU PID
+		pidBytes, err := os.ReadFile(filepath.Join(d, "qemu.pid"))
+		if err != nil {
+			resp.Diagnostics.AddWarning("CPU Pinning Warning",
+				fmt.Sprintf("Could not read QEMU PID file: %v", err))
+		} else {
+			pidStr := strings.TrimSpace(string(pidBytes))
+			qemuPID, err := strconv.Atoi(pidStr)
+			if err != nil {
+				resp.Diagnostics.AddWarning("CPU Pinning Warning",
+					fmt.Sprintf("Invalid QEMU PID: %v", err))
+			} else {
+				// Pin CPU threads
+				if err := r.pinCPUThreads(ctx, qemuPID, cpuPins, numCPUs, d); err != nil {
+					resp.Diagnostics.AddWarning("CPU Pinning Warning",
+						fmt.Sprintf("Failed to pin CPU threads: %v", err))
+				}
+			}
+		}
+	}
 
 	x, err := readEdgeNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {

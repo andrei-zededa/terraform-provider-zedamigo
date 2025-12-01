@@ -62,6 +62,7 @@ type ZedAmigoProviderConfig struct {
 	Bash         string
 	GenISOImage  string
 	IP           string
+	Taskset      string
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -328,6 +329,16 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 	zaConf.GenISOImage = gencmd
+
+	taskset, err := exec.LookPath("taskset")
+	if err != nil {
+		resp.Diagnostics.AddWarning("Can't find the `taskset` executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the cpu_pins feature. Can't find `taskset`, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.Taskset = taskset
 
 	// Make the provider config available during DataSource and Resource
 	// type Configure methods.
