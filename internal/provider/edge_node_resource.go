@@ -462,9 +462,9 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 
 	qemuArgs := []string{}
 	if !data.Name.IsNull() {
-		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_%s", data.Name.ValueString())}...)
+		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("guest=%s,debug-threads=on", data.Name.ValueString())}...)
 	} else {
-		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_%s", data.ID.ValueString())}...)
+		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("guest=%s,debug-threads=on", data.ID.ValueString())}...)
 	}
 
 	qemuArgs = append(qemuArgs, []string{
@@ -492,11 +492,6 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		"-qmp", data.QmpSocket.ValueString(),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
 	}...)
-
-	// Enable thread naming for CPU pinning if configured
-	if !data.CPUPins.IsNull() && !data.CPUPins.IsUnknown() {
-		qemuArgs = append(qemuArgs, "-global", "debug-threads=on")
-	}
 
 	nic0 := fmt.Sprintf(nic0Fmt, data.SSHPort.ValueInt32(),
 		data.SSHPort.ValueInt32()+1, data.SSHPort.ValueInt32()+2)
