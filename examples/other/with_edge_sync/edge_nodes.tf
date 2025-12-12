@@ -86,7 +86,7 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM" {
   for_each = local.nodes
 
   name               = "ENODE_TEST_VM_${each.value}_${var.config_suffix}"
-  cpus               = "4"
+  cpus               = 4
   mem                = "4G"
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL[each.key].serial_no
   serial_port_server = true

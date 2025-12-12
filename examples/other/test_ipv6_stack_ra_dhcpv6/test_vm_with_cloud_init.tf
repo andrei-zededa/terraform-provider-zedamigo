@@ -25,7 +25,7 @@ resource "zedamigo_cloud_init_iso" "CI_DATA_01" {
 
 resource "zedamigo_edge_node" "TEST_VM_01" {
   name               = local.vm_name
-  cpus               = "4"
+  cpus               = 4
   mem                = "4G"
   serial_no          = "1000"
   serial_port_server = true

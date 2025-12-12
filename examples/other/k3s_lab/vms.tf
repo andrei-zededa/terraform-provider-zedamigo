@@ -24,7 +24,7 @@ locals {
 
 resource "zedamigo_vm" "CONTROL_PLANE_01" {
   name               = local.control_plane.name
-  cpus               = "2"
+  cpus               = 2
   mem                = "2G"
   serial_no          = local.control_plane.serial
   serial_port_server = true
@@ -42,7 +42,7 @@ resource "zedamigo_vm" "NODES" {
   for_each = local.nodes
 
   name               = each.value.name
-  cpus               = "1"
+  cpus               = 1
   mem                = "1G"
   serial_no          = each.value.serial
   serial_port_server = true

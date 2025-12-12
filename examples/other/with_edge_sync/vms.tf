@@ -24,7 +24,7 @@ resource "zedamigo_cloud_init_iso" "EDGE_SYNC_CI" {
 
 resource "zedamigo_vm" "EDGE_SYNC" {
   name               = "edge_sync_vm"
-  cpus               = "2"
+  cpus               = 2
   mem                = "2G"
   serial_no          = "1234"
   serial_port_server = true
