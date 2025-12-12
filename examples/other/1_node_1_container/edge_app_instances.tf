@@ -6,10 +6,10 @@ locals {
   # an edge-app-instance and setting some of the custom config variables.
   APP_INST_CUSTOM_CONF_OVERRIDES = {
     "HELLO_USERNAME" = {
-      value = ""
+      value = var.HELLO_ZEDCLOUD_APP_USERNAME
     },
     "HELLO_PASSWORD" = {
-      value = ""
+      value = var.HELLO_ZEDCLOUD_APP_PASSWORD
     },
   }
 
