@@ -193,7 +193,7 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #      ❯ tofu state show zedamigo_edge_node.ENODE_TEST_VM
 #      # zedamigo_edge_node.ENODE_TEST_VM:
 #      resource "zedamigo_edge_node" "ENODE_TEST_VM" {
-#          cpus               = "4"
+#          cpus               = 4
 #          disk_image         = "/home/ev-zed1/.local/state/zedamigo/edge_nodes/f8086b9b-bfb5-4d11-8c70-77d4d0453e33/disk0.disk_img.qcow2"
 #          disk_image_base    = "/home/ev-zed1/.local/state/zedamigo/installed_nodes/b99f1fae-3f51-4bda-933e-f9d29f01d857/disk0.disk_img.qcow2"
 #          id                 = "f8086b9b-bfb5-4d11-8c70-77d4d0453e33"
@@ -214,7 +214,7 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name               = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus               = "2"
+  cpus               = 2
   mem                = "2G"
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true

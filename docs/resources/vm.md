@@ -22,7 +22,11 @@ Edge Node / VM in the general case
 
 ### Optional
 
-- `cpus` (String) Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.
+- `cpu_pins` (List of Number) List of host CPU core IDs to pin the VM's vCPUs to. When specified,
+the length must equal the number of CPUs. For example, with 4 CPUs
+and cpu_pins = [0, 2, 4, 6], vCPU 0 pins to host core 0, vCPU 1 to
+core 2, etc. Requires QEMU to start with debug-threads enabled.
+- `cpus` (Number) Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.
 - `disk_1_image_base` (String) Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)
 - `disk_size_mb` (Number) Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.
 - `drive_if` (String) The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.

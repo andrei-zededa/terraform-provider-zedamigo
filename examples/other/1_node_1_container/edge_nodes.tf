@@ -18,11 +18,9 @@ resource "zedcloud_network" "edge_node_as_dhcp_client" {
 }
 
 resource "zedcloud_edgenode" "ENODE_TEST" {
-  for_each = local.nodes
-
-  name           = "ENODE_TEST_${each.value}_${var.config_suffix}"
-  title          = "ENODE_TEST ${each.value}"
-  serialno       = "SN_TEST_${each.value}_${var.config_suffix}"
+  name           = "ENODE_TEST_${var.config_suffix}"
+  title          = "ENODE_TEST"
+  serialno       = "SN_TEST_${var.config_suffix}"
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -30,7 +28,7 @@ resource "zedcloud_edgenode" "ENODE_TEST" {
 
   config_item {
     key          = "debug.enable.ssh"
-    string_value = var.edge_node_ssh_pub_key
+    string_value = var.ssh_pub_key
     # Need to set this otherwise we keep getting diff with the info in Zedcloud.
     uint64_value = "0"
   }
@@ -40,27 +38,19 @@ resource "zedcloud_edgenode" "ENODE_TEST" {
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
+    net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
+    ztype      = "IO_TYPE_ETH"
+
     tags = {}
   }
-
-  interfaces {
-    intfname   = "eth1"
-    intf_usage = "ADAPTER_USAGE_APP_SHARED"
-    cost       = 0
-    netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
-  }
-
   tags = {}
 }
 
-resource "zedamigo_eve_installer" "eve_os_installer_iso_1451" {
-  name            = "EVE-OS_14.5.1-lts-kvm-amd64"
-  tag             = "14.5.1-lts-kvm-amd64"
+resource "zedamigo_eve_installer" "eve_os_installer_iso" {
+  name            = "EVE-OS"
+  tag             = "14.5.2-lts-kvm-amd64"
   cluster         = var.ZEDEDA_CLOUD_URL
-  authorized_keys = var.edge_node_ssh_pub_key
+  authorized_keys = var.ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
    # This is actually better for the QEMU VM case.
@@ -74,27 +64,18 @@ resource "zedamigo_disk_image" "empty_disk_100G" {
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL" {
-  for_each = local.nodes
-
-  name            = "ENODE_TEST_INSTALL_${each.value}_${var.config_suffix}"
-  serial_no       = zedcloud_edgenode.ENODE_TEST[each.key].serialno
-  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso_1451.filename
+  name            = "ENODE_TEST_INSTALL_${var.config_suffix}"
+  serial_no       = zedcloud_edgenode.ENODE_TEST.serialno
+  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM" {
-  for_each = local.nodes
-
-  name               = "ENODE_TEST_VM_${each.value}_${var.config_suffix}"
-  cpus               = 4
-  mem                = "4G"
-  serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL[each.key].serial_no
+  name               = "ENODE_TEST_VM_${var.config_suffix}"
+  cpus               = 2
+  mem                = "2G"
+  serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL.serial_no
   serial_port_server = true
-  disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL[each.key].disk_image
-  ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL[each.key].ovmf_vars
-
-  extra_qemu_args = [
-    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP[each.key].name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
-  ]
-
+  disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL.disk_image
+  ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL.ovmf_vars
 }

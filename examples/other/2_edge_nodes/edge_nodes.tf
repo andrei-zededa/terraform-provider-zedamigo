@@ -109,16 +109,16 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1450" {
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
 #### created and run the install process.
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
-  name          = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
-  serial_no     = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  installer_iso = zedamigo_eve_installer.eve_os_installer_iso_1343.filename
+  name            = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
+  serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
+  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso_1343.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
-  name          = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
-  serial_no     = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
-  installer_iso = zedamigo_eve_installer.eve_os_installer_iso_1450.filename
+  name            = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
+  serial_no       = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
+  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso_1450.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
 
@@ -130,7 +130,7 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
 #      ❯ tofu state show zedamigo_edge_node.ENODE_TEST_VM
 #      # zedamigo_edge_node.ENODE_TEST_VM:
 #      resource "zedamigo_edge_node" "ENODE_TEST_VM" {
-#          cpus               = "4"
+#          cpus               = 4
 #          disk_image         = "/home/ev-zed1/.local/state/zedamigo/edge_nodes/f8086b9b-bfb5-4d11-8c70-77d4d0453e33/disk0.disk_img.qcow2"
 #          disk_image_base    = "/home/ev-zed1/.local/state/zedamigo/installed_nodes/b99f1fae-3f51-4bda-933e-f9d29f01d857/disk0.disk_img.qcow2"
 #          id                 = "f8086b9b-bfb5-4d11-8c70-77d4d0453e33"
@@ -151,7 +151,7 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name               = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus               = "4"
+  cpus               = 4
   mem                = "4G"
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true
@@ -161,7 +161,7 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
   name               = "ENODE_TEST_VM_BBBB_${var.config_suffix}"
-  cpus               = "4"
+  cpus               = 4
   mem                = "4G"
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.serial_no
   serial_port_server = true
