@@ -1,0 +1,4 @@
+#cloud-config
+runcmd:
+  - HELLO_USERNAME=###HELLO_USERNAME###
+  - HELLO_PASSWORD=###HELLO_PASSWORD###
