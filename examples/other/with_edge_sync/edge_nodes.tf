@@ -30,7 +30,7 @@ resource "zedcloud_edgenode" "ENODE_TEST" {
 
   config_item {
     key          = "debug.enable.ssh"
-    string_value = var.edge_node_ssh_pub_key
+    string_value = var.ssh_pub_key
     # Need to set this otherwise we keep getting diff with the info in Zedcloud.
     uint64_value = "0"
   }
@@ -60,7 +60,7 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1451" {
   name            = "EVE-OS_14.5.1-lts-kvm-amd64"
   tag             = "14.5.1-lts-kvm-amd64"
   cluster         = var.ZEDEDA_CLOUD_URL
-  authorized_keys = var.edge_node_ssh_pub_key
+  authorized_keys = var.ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
    # This is actually better for the QEMU VM case.
@@ -96,5 +96,4 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM" {
   extra_qemu_args = [
     "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP[each.key].name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
   ]
-
 }

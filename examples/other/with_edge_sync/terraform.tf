@@ -2,7 +2,7 @@ terraform {
   required_providers {
     zedamigo = {
       source  = "localhost/andrei-zededa/zedamigo"
-      version = "0.0.0-dev.bfeatinstallserialwait+ceb447d0"
+      version = ">= 0.7.0"
     }
 
     zedcloud = {

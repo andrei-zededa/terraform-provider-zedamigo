@@ -5,7 +5,7 @@ resource "zedamigo_cloud_init_iso" "EDGE_SYNC_CI" {
   user_data = templatefile("./cloud-init/user-data.tftpl",
     {
       user             = var.user,
-      user_ssh_pub_key = var.edge_node_ssh_pub_key,
+      user_ssh_pub_key = var.ssh_pub_key,
       hostname         = local.edge_sync.hostname,
       domainname       = local.edge_sync.domainname,
       custom_hosts     = [],
