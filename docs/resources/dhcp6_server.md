@@ -5,6 +5,7 @@ subcategory: ""
 description: |-
   Create and manage a DHCP v6 server instance with a simple configuration
   that listens on a specific interface. Uses an embedded instance of CoreDHCP (https://github.com/coredhcp/coredhcp).
+  NOTE: Static routes are not supported for DHCPv6.
   NOTE: If the host has a firewall configuration that might drop incoming UDP port 547 packets. Double check that.
   This resource DOES NOT manage the host firewall configuration.
 ---
@@ -13,6 +14,7 @@ description: |-
 
 Create and manage a DHCP v6 server instance with a simple configuration
 		that listens on a specific interface. Uses an embedded instance of CoreDHCP (https://github.com/coredhcp/coredhcp).
+		NOTE: Static routes are not supported for DHCPv6.
 		NOTE: If the host has a firewall configuration that might drop incoming UDP port 547 packets. Double check that.
 		This resource DOES NOT manage the host firewall configuration.
 

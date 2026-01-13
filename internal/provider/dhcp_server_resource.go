@@ -16,10 +16,10 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -41,6 +41,9 @@ server4:
     - router: {{ .Router }}
     - netmask: {{ .Netmask }}
     - range: {{ .LeasesFile }} {{ .PoolStart }} {{ .PoolEnd }} {{ .LeaseTime }}s
+{{- range .StaticRoutes }}
+    - staticroute: {{ .To.ValueString }},{{ .Via.ValueString }}
+{{- end }}
 `
 )
 
@@ -65,20 +68,27 @@ type DHCPPoolModel struct {
 	End   types.String `tfsdk:"end"`
 }
 
+// DHCPStaticRouteModel describes a static route entry.
+type DHCPStaticRouteModel struct {
+	To  types.String `tfsdk:"to"`
+	Via types.String `tfsdk:"via"`
+}
+
 // DHCPServerModel describes the resource data model.
 type DHCPServerModel struct {
-	ID         types.String    `tfsdk:"id"`
-	Interface  types.String    `tfsdk:"interface"`
-	ServerID   types.String    `tfsdk:"server_id"`
-	NameServer types.String    `tfsdk:"nameserver"`
-	Router     types.String    `tfsdk:"router"`
-	Netmask    types.String    `tfsdk:"netmask"`
-	Pool       *DHCPPoolModel  `tfsdk:"pool"`
-	LeaseTime  types.Int64     `tfsdk:"lease_time"`
-	LeasesFile types.String    `tfsdk:"leases_file"`
-	ConfigFile types.String    `tfsdk:"config_file"`
-	PIDFile    types.String    `tfsdk:"pid_file"`
-	State      types.String    `tfsdk:"state"`
+	ID           types.String           `tfsdk:"id"`
+	Interface    types.String           `tfsdk:"interface"`
+	ServerID     types.String           `tfsdk:"server_id"`
+	NameServer   types.String           `tfsdk:"nameserver"`
+	Router       types.String           `tfsdk:"router"`
+	Netmask      types.String           `tfsdk:"netmask"`
+	Pool         *DHCPPoolModel         `tfsdk:"pool"`
+	LeaseTime    types.Int64            `tfsdk:"lease_time"`
+	StaticRoutes []DHCPStaticRouteModel `tfsdk:"static_route"`
+	LeasesFile   types.String           `tfsdk:"leases_file"`
+	ConfigFile   types.String           `tfsdk:"config_file"`
+	PIDFile      types.String           `tfsdk:"pid_file"`
+	State        types.String           `tfsdk:"state"`
 }
 
 func (r *DHCPServer) getResourceDir(id string) string {
@@ -181,6 +191,21 @@ func (r *DHCPServer) Schema(ctx context.Context, req resource.SchemaRequest, res
 					},
 				},
 			},
+			"static_route": schema.ListNestedBlock{
+				Description: "List of static routes to be advertised to DHCP clients.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"to": schema.StringAttribute{
+							Description: "Destination CIDR for the static route (e.g. '192.168.2.0/24').",
+							Required:    true,
+						},
+						"via": schema.StringAttribute{
+							Description: "Gateway IP address for the static route.",
+							Required:    true,
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -274,25 +299,27 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 	// template.Execute then that will call field.String() which returns
 	// the value double-quoted.
 	td := struct {
-		Interface  string
-		ServerID   string
-		NameServer string
-		Router     string
-		Netmask    string
-		PoolStart  string
-		PoolEnd    string
-		LeaseTime  int64
-		LeasesFile string
+		Interface    string
+		ServerID     string
+		NameServer   string
+		Router       string
+		Netmask      string
+		PoolStart    string
+		PoolEnd      string
+		LeaseTime    int64
+		StaticRoutes []DHCPStaticRouteModel
+		LeasesFile   string
 	}{
-		Interface:  data.Interface.ValueString(),
-		ServerID:   data.ServerID.ValueString(),
-		NameServer: data.NameServer.ValueString(),
-		Router:     data.Router.ValueString(),
-		Netmask:    data.Netmask.ValueString(),
-		PoolStart:  data.Pool.Start.ValueString(),
-		PoolEnd:    data.Pool.End.ValueString(),
-		LeaseTime:  data.LeaseTime.ValueInt64(),
-		LeasesFile: data.LeasesFile.ValueString(),
+		Interface:    data.Interface.ValueString(),
+		ServerID:     data.ServerID.ValueString(),
+		NameServer:   data.NameServer.ValueString(),
+		Router:       data.Router.ValueString(),
+		Netmask:      data.Netmask.ValueString(),
+		PoolStart:    data.Pool.Start.ValueString(),
+		PoolEnd:      data.Pool.End.ValueString(),
+		LeaseTime:    data.LeaseTime.ValueInt64(),
+		StaticRoutes: data.StaticRoutes,
+		LeasesFile:   data.LeasesFile.ValueString(),
 	}
 	if err := tmpl.Execute(confFile, td); err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Error",
@@ -386,7 +413,8 @@ func (r *DHCPServer) Update(ctx context.Context, req resource.UpdateRequest, res
 		!plan.Router.Equal(state.Router) ||
 		!plan.Netmask.Equal(state.Netmask) ||
 		poolChanged ||
-		!plan.LeaseTime.Equal(state.LeaseTime)
+		!plan.LeaseTime.Equal(state.LeaseTime) ||
+		!equalStaticRoutes(plan.StaticRoutes, state.StaticRoutes)
 
 	if configChanged {
 		resp.Diagnostics.AddError("DHCPServer Resource Update Error",
@@ -572,4 +600,16 @@ func readDHCPServerPID(path string) (bool, *process.Process, error) {
 	}
 
 	return true, p, nil
+}
+
+func equalStaticRoutes(a, b []DHCPStaticRouteModel) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !a[i].To.Equal(b[i].To) || !a[i].Via.Equal(b[i].Via) {
+			return false
+		}
+	}
+	return true
 }

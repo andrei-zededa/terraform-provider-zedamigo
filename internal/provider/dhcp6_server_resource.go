@@ -16,10 +16,10 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -69,17 +69,17 @@ type DHCP6PoolModel struct {
 
 // DHCP6ServerModel describes the resource data model.
 type DHCP6ServerModel struct {
-	ID         types.String     `tfsdk:"id"`
-	Interface  types.String     `tfsdk:"interface"`
-	ServerID   types.String     `tfsdk:"server_id"`
-	Prefix     types.String     `tfsdk:"prefix"`
-	NameServer types.String     `tfsdk:"nameserver"`
-	Pool       *DHCP6PoolModel  `tfsdk:"pool"`
-	LeaseTime  types.Int64      `tfsdk:"lease_time"`
-	LeasesFile types.String     `tfsdk:"leases_file"`
-	ConfigFile types.String     `tfsdk:"config_file"`
-	PIDFile    types.String     `tfsdk:"pid_file"`
-	State      types.String     `tfsdk:"state"`
+	ID         types.String    `tfsdk:"id"`
+	Interface  types.String    `tfsdk:"interface"`
+	ServerID   types.String    `tfsdk:"server_id"`
+	Prefix     types.String    `tfsdk:"prefix"`
+	NameServer types.String    `tfsdk:"nameserver"`
+	Pool       *DHCP6PoolModel `tfsdk:"pool"`
+	LeaseTime  types.Int64     `tfsdk:"lease_time"`
+	LeasesFile types.String    `tfsdk:"leases_file"`
+	ConfigFile types.String    `tfsdk:"config_file"`
+	PIDFile    types.String    `tfsdk:"pid_file"`
+	State      types.String    `tfsdk:"state"`
 }
 
 func (r *DHCP6Server) getResourceDir(id string) string {
@@ -95,6 +95,7 @@ func (r *DHCP6Server) Schema(ctx context.Context, req resource.SchemaRequest, re
 		Description: "Simple DHCP v6 server for a specific interface",
 		MarkdownDescription: undent.Md(`Create and manage a DHCP v6 server instance with a simple configuration
 		that listens on a specific interface. Uses an embedded instance of CoreDHCP (https://github.com/coredhcp/coredhcp).
+		NOTE: Static routes are not supported for DHCPv6.
 		NOTE: If the host has a firewall configuration that might drop incoming UDP port 547 packets. Double check that.
 		This resource DOES NOT manage the host firewall configuration.`),
 

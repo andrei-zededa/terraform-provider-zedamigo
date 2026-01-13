@@ -20,19 +20,20 @@ import (
 )
 
 type radvDaemonConfig struct {
-	Interface               string `yaml:"interface"`
-	Prefix                  string `yaml:"prefix"`
-	PrefixOnLink            bool   `yaml:"prefix_on_link"`
-	PrefixAutonomous        bool   `yaml:"prefix_autonomous"`
-	PrefixValidLifetime     int64  `yaml:"prefix_valid_lifetime"`
-	PrefixPreferredLifetime int64  `yaml:"prefix_preferred_lifetime"`
-	DNSServers              string `yaml:"dns_servers"`
-	ManagedConfig           bool   `yaml:"managed_config"`
-	OtherConfig             bool   `yaml:"other_config"`
-	RouterLifetime          int64  `yaml:"router_lifetime"`
-	MaxInterval             int64  `yaml:"max_interval"`
-	MinInterval             int64  `yaml:"min_interval"`
-	HopLimit                int64  `yaml:"hop_limit"`
+	Interface               string   `yaml:"interface"`
+	Prefix                  string   `yaml:"prefix"`
+	Routes                  []string `yaml:"routes"`
+	PrefixOnLink            bool     `yaml:"prefix_on_link"`
+	PrefixAutonomous        bool     `yaml:"prefix_autonomous"`
+	PrefixValidLifetime     int64    `yaml:"prefix_valid_lifetime"`
+	PrefixPreferredLifetime int64    `yaml:"prefix_preferred_lifetime"`
+	DNSServers              string   `yaml:"dns_servers"`
+	ManagedConfig           bool     `yaml:"managed_config"`
+	OtherConfig             bool     `yaml:"other_config"`
+	RouterLifetime          int64    `yaml:"router_lifetime"`
+	MaxInterval             int64    `yaml:"max_interval"`
+	MinInterval             int64    `yaml:"min_interval"`
+	HopLimit                int64    `yaml:"hop_limit"`
 }
 
 func radvMain() {
@@ -124,6 +125,24 @@ func buildRouterAdvertisement(config *radvDaemonConfig, prefix netip.Prefix) *nd
 	}
 
 	options := []ndp.Option{prefixInfo}
+
+	// Add Route Information Options if specified
+	for _, route := range config.Routes {
+		rPrefix, err := netip.ParsePrefix(route)
+		if err != nil {
+			log.Printf("Warning: invalid route prefix %s: %v", route, err)
+			continue
+		}
+		routeInfo := &ndp.RouteInformation{
+			PrefixLength: uint8(rPrefix.Bits()),
+			Prefix:       rPrefix.Addr(),
+			// By default, the preference is Medium (0) and lifetime is RouterLifetime.
+			// This matches radvd's default behavior for route information options.
+			Preference:    ndp.Medium,
+			RouteLifetime: time.Duration(config.RouterLifetime) * time.Second,
+		}
+		options = append(options, routeInfo)
+	}
 
 	// Add DNS servers if specified
 	if config.DNSServers != "" {

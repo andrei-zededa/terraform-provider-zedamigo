@@ -35,6 +35,14 @@ resource "zedamigo_dhcp_server" "test" {
     start = "172.27.244.100"
     end   = "172.27.244.199"
   }
+  static_route {
+    to  = "10.10.10.0/24"
+    via = "172.27.244.254"
+  }
+  static_route {
+    to  = "11.11.11.0/24"
+    via = "172.27.244.254"
+  }
   lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
 ```
@@ -61,6 +69,7 @@ resource "zedamigo_dhcp_server" "test" {
 - `pool` (Block, Optional) DHCP v4 address pool configuration for dynamic allocation (see [below for nested schema](#nestedblock--pool))
 - `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
+- `static_route` (Block List) List of static routes to be advertised to DHCP clients. (see [below for nested schema](#nestedblock--static_route))
 
 ### Read-Only
 
@@ -76,3 +85,12 @@ Required:
 
 - `end` (String) DHCP v4 pool last IPv4 address for dynamic allocation
 - `start` (String) DHCP v4 pool first IPv4 address for dynamic allocation
+
+
+<a id="nestedblock--static_route"></a>
+### Nested Schema for `static_route`
+
+Required:
+
+- `to` (String) Destination CIDR for the static route (e.g. '192.168.2.0/24').
+- `via` (String) Gateway IP address for the static route.

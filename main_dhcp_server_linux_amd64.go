@@ -14,6 +14,7 @@ import (
 	pl_range "github.com/coredhcp/coredhcp/plugins/range"
 	pl_router "github.com/coredhcp/coredhcp/plugins/router"
 	pl_serverid "github.com/coredhcp/coredhcp/plugins/serverid"
+	pl_staticroute "github.com/coredhcp/coredhcp/plugins/staticroute"
 
 	"github.com/sirupsen/logrus"
 )
@@ -24,6 +25,7 @@ var desiredPlugins = []*plugins.Plugin{
 	&pl_router.Plugin,
 	&pl_netmask.Plugin,
 	&pl_range.Plugin,
+	&pl_staticroute.Plugin,
 }
 
 func dhcpServerMain() {

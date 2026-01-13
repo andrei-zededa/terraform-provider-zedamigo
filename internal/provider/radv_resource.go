@@ -16,13 +16,16 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/gofrs/uuid/v5"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/shirou/gopsutil/v4/process"
@@ -37,6 +40,7 @@ prefix_on_link: {{ .PrefixOnLink }}
 prefix_autonomous: {{ .PrefixAutonomous }}
 prefix_valid_lifetime: {{ .PrefixValidLifetime }}
 prefix_preferred_lifetime: {{ .PrefixPreferredLifetime }}
+routes: [{{ range $i, $e := .Routes }}{{if $i}},{{end}}"{{ .Prefix.ValueString }}"{{end}}]
 dns_servers: {{ .DNSServers }}
 managed_config: {{ .ManagedConfig }}
 other_config: {{ .OtherConfig }}
@@ -62,25 +66,31 @@ type RADV struct {
 	providerConf *ZedAmigoProviderConfig
 }
 
+// RadvRouteModel describes a route entry.
+type RadvRouteModel struct {
+	Prefix types.String `tfsdk:"prefix"`
+}
+
 // RADVModel describes the resource data model.
 type RADVModel struct {
-	ID                      types.String `tfsdk:"id"`
-	Interface               types.String `tfsdk:"interface"`
-	Prefix                  types.String `tfsdk:"prefix"`
-	PrefixOnLink            types.Bool   `tfsdk:"prefix_on_link"`
-	PrefixAutonomous        types.Bool   `tfsdk:"prefix_autonomous"`
-	PrefixValidLifetime     types.Int64  `tfsdk:"prefix_valid_lifetime"`
-	PrefixPreferredLifetime types.Int64  `tfsdk:"prefix_preferred_lifetime"`
-	DNSServers              types.String `tfsdk:"dns_servers"`
-	ManagedConfig           types.Bool   `tfsdk:"managed_config"`
-	OtherConfig             types.Bool   `tfsdk:"other_config"`
-	RouterLifetime          types.Int64  `tfsdk:"router_lifetime"`
-	MaxInterval             types.Int64  `tfsdk:"max_interval"`
-	MinInterval             types.Int64  `tfsdk:"min_interval"`
-	HopLimit                types.Int64  `tfsdk:"hop_limit"`
-	ConfigFile              types.String `tfsdk:"config_file"`
-	PIDFile                 types.String `tfsdk:"pid_file"`
-	State                   types.String `tfsdk:"state"`
+	ID                      types.String     `tfsdk:"id"`
+	Interface               types.String     `tfsdk:"interface"`
+	Prefix                  types.String     `tfsdk:"prefix"`
+	Routes                  []RadvRouteModel `tfsdk:"route"`
+	PrefixOnLink            types.Bool       `tfsdk:"prefix_on_link"`
+	PrefixAutonomous        types.Bool       `tfsdk:"prefix_autonomous"`
+	PrefixValidLifetime     types.Int64      `tfsdk:"prefix_valid_lifetime"`
+	PrefixPreferredLifetime types.Int64      `tfsdk:"prefix_preferred_lifetime"`
+	DNSServers              types.String     `tfsdk:"dns_servers"`
+	ManagedConfig           types.Bool       `tfsdk:"managed_config"`
+	OtherConfig             types.Bool       `tfsdk:"other_config"`
+	RouterLifetime          types.Int64      `tfsdk:"router_lifetime"`
+	MaxInterval             types.Int64      `tfsdk:"max_interval"`
+	MinInterval             types.Int64      `tfsdk:"min_interval"`
+	HopLimit                types.Int64      `tfsdk:"hop_limit"`
+	ConfigFile              types.String     `tfsdk:"config_file"`
+	PIDFile                 types.String     `tfsdk:"pid_file"`
+	State                   types.String     `tfsdk:"state"`
 }
 
 func (r *RADV) getResourceDir(id string) string {
@@ -217,6 +227,25 @@ func (r *RADV) Schema(ctx context.Context, req resource.SchemaRequest, resp *res
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.`),
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"route": schema.ListNestedBlock{
+				Description: "List of more-specific routes to be advertised to clients (RFC 4191).",
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(0),
+				},
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"prefix": schema.StringAttribute{
+							Description: "Destination CIDR for the static route (e.g. '2001:db8:1::/48').",
+							Required:    true,
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -302,6 +331,7 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	td := struct {
 		Interface               string
 		Prefix                  string
+		Routes                  []RadvRouteModel
 		PrefixOnLink            bool
 		PrefixAutonomous        bool
 		PrefixValidLifetime     int64
@@ -316,6 +346,7 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	}{
 		Interface:               data.Interface.ValueString(),
 		Prefix:                  data.Prefix.ValueString(),
+		Routes:                  data.Routes,
 		PrefixOnLink:            data.PrefixOnLink.ValueBool(),
 		PrefixAutonomous:        data.PrefixAutonomous.ValueBool(),
 		PrefixValidLifetime:     data.PrefixValidLifetime.ValueInt64(),

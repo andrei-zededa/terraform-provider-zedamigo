@@ -22,7 +22,7 @@ Create and manage an IPv6 Router Advertisement daemon for a specific interface.
 variable "intf_to_advertise" {
   sensitive = false
   type      = string
-  default   = "eth1"
+  default   = "eth100"
 }
 
 # Basic SLAAC setup.
@@ -33,11 +33,17 @@ resource "zedamigo_radv" "slaac" {
   prefix_autonomous = true  # Allow SLAAC.
   managed_config    = false # Don't require DHCPv6 for addresses.
   other_config      = false # Don't require DHCPv6 for other config.
+  route {
+    prefix = "2001:db8::/32"
+  }
+  route {
+    prefix = "2001:db8:1234:5678::/64"
+  }
 }
 
 # DHCPv6 only (SLAAC disabled).
 resource "zedamigo_radv" "dhcpv6_only" {
-  interface         = "eth2"
+  interface         = "eth101"
   prefix            = "fd00:1111:2222::/64"
   prefix_autonomous = false # Disable SLAAC.
   managed_config    = true  # Use DHCPv6 for addresses.
@@ -72,6 +78,7 @@ resource "zedamigo_radv" "dhcpv6_only" {
 				Typically set to true. Default: true
 - `prefix_preferred_lifetime` (Number) Length of time in seconds that addresses generated from the prefix remain preferred. Default: 14400 (4 hours)
 - `prefix_valid_lifetime` (Number) Length of time in seconds that the prefix is valid. Default: 86400 (24 hours)
+- `route` (Block List) List of more-specific routes to be advertised to clients (RFC 4191). (see [below for nested schema](#nestedblock--route))
 - `router_lifetime` (Number) Lifetime associated with the default router in seconds. Default: 1800 (30 minutes)
 - `state` (String) Desired state of the RADV daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.
@@ -81,3 +88,10 @@ resource "zedamigo_radv" "dhcpv6_only" {
 - `config_file` (String) The auto-generated RADV configuration file
 - `id` (String) RADV resource identifier.
 - `pid_file` (String) Process ID file
+
+<a id="nestedblock--route"></a>
+### Nested Schema for `route`
+
+Required:
+
+- `prefix` (String) Destination CIDR for the static route (e.g. '2001:db8:1::/48').

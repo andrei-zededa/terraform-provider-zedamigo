@@ -14,5 +14,13 @@ resource "zedamigo_dhcp_server" "test" {
     start = "172.27.244.100"
     end   = "172.27.244.199"
   }
+  static_route {
+    to  = "10.10.10.0/24"
+    via = "172.27.244.254"
+  }
+  static_route {
+    to  = "11.11.11.0/24"
+    via = "172.27.244.254"
+  }
   lease_time = 3600 # Optional: lease time in seconds (default: 3600)
 }
