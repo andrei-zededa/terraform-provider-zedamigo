@@ -7,11 +7,11 @@ resource "zedcloud_network_instance" "local_nat" {
   type      = "NETWORK_INSTANCE_DHCP_TYPE_V4"
   device_id = module.edge_node[each.key].id
 
-  port           = "eth0"
+  port           = "ethmgmt" # Matches on edge-node adapter name which must be equal to model logical label.
   device_default = true
 
   tags = {
-    ni_local_nat = "true"
+    ni_local_nat = "true" # This will be used by the app-instance interface.
   }
 }
 
@@ -24,7 +24,9 @@ resource "zedcloud_network_instance" "app_shared" {
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = module.edge_node[each.key].id
 
-  port = "eth1"
+  port = "ethapp2" # Matches on edge-node adapter name which must be equal to model logical label.
 
-  tags = {}
+  tags = {
+    app_traffic = "app1" # This will be used by the app-instance interface.
+  }
 }

@@ -1,11 +1,12 @@
 data "zedcloud_project" "enterprise" {
-  name  = var.project_name
+  name  = var.enterprise_project_name
   title = "" # Title is a mandatory attribute but actually for a datasource it's value is retrieved from Zedcloud.
   type  = ""
 }
 
 data "zedcloud_model" "enterprise" {
-  name        = var.model_name
+  for_each    = toset([for node in var.nodes : node.model_name])
+  name        = each.value
   brand_id    = ""
   title       = ""
   type        = ""

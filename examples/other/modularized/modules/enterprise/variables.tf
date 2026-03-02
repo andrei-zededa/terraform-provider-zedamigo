@@ -6,7 +6,7 @@ variable "name_suffix" {
 variable "project_name" {
   description = "Name for the enterprise project"
   type        = string
-  default     = "PROJECT_DEFAULT"
+  default     = "default_project"
 }
 
 variable "ssh_pub_key" {

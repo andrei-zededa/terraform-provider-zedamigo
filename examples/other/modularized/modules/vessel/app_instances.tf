@@ -46,13 +46,20 @@ resource "zedcloud_application_instance" "vm_instance" {
     intfname    = data.zedcloud_application.enterprise.manifest[0].interfaces[0].name
     intforder   = 1
     privateip   = false
-    netinstname = zedcloud_network_instance.local_nat[each.key].name
+    netinstname = ""
+    netinsttag = {
+      ni_local_nat = "true" # Matches an existing network-instance on the node that has this tag (K/V)."
+    }
+
   }
 
   interfaces {
     intfname    = data.zedcloud_application.enterprise.manifest[0].interfaces[1].name
     intforder   = 2
     privateip   = false
-    netinstname = zedcloud_network_instance.app_shared[each.key].name
+    netinstname = ""
+    netinsttag = {
+      app_traffic = "app1" # Matches an existing network-instance on the node that has this tag (K/V).
+    }
   }
 }

@@ -17,91 +17,52 @@ variable "name_suffix" {
 
 # Created by the "enterprise-global" terraform config, will be referenced as a
 # datasoource.
-variable "project_name" {
-  description = "Name of the enterprise project"
+variable "enterprise_project_name" {
+  description = "Name of the enterprise project to look up"
   type        = string
-  default     = "PROJECT_DEFAULT_test7"
-}
-
-# Created by the "enterprise-global" terraform config, will be referenced as a
-# datasoource.
-variable "model_name" {
-  description = "Name of the enterprise model"
-  type        = string
-  default     = "QEMU_VM_test7"
+  default     = "default_project"
 }
 
 # Created by the "enterprise-global" terraform config, will be referenced as a
 # datasoource.
 variable "network_name" {
-  description = "Name of the enterprise default network"
+  description = "Name of the enterprise default network to look up"
   type        = string
-  default     = "default_network_dhcp_client_test7"
+  default     = "default_network_dhcp_client"
 }
 
 # Created by the "enterprise-global" terraform config, will be referenced as a
 # datasoource.
 variable "app_name" {
-  description = "Name of the enterprise app definition"
+  description = "Name of the enterprise app definition to look up"
   type        = string
-  default     = "ubuntu_vm_test7"
+  default     = "ubuntu_vm"
+}
+
+variable "vessel_project_name" {
+  description = "Name of the project that will be created for this vessel"
+  type        = string
+  default     = "vessel_test01"
 }
 
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
+    model_name     = string
     serialno       = string
     onboarding_key = optional(string, "")
     ssh_pub_key    = optional(string, "")
     tags           = optional(map(string), {})
-    interfaces = list(object({
-      intfname   = string
-      intf_usage = string
-      cost       = number
-      netname    = string
-      ztype      = string
-      tags       = optional(map(string), {})
-    }))
   }))
 
   default = {
-    "AAAA" = {
-      serialno = "SN_AAAA"
-      interfaces = [
-        {
-          intfname   = "eth0"
-          intf_usage = "ADAPTER_USAGE_MANAGEMENT"
-          cost       = 0
-          netname    = ""
-          ztype      = "IO_TYPE_ETH"
-        },
-        {
-          intfname   = "eth1"
-          intf_usage = "ADAPTER_USAGE_APP_SHARED"
-          cost       = 0
-          netname    = ""
-          ztype      = "IO_TYPE_ETH"
-        },
-      ]
+    "DDDD" = {
+      model_name = "QEMU_VM_DDDD"
+      serialno   = "SN_DDDD"
     }
-    "BBBB" = {
-      serialno = "SN_BBBB"
-      interfaces = [
-        {
-          intfname   = "eth0"
-          intf_usage = "ADAPTER_USAGE_MANAGEMENT"
-          cost       = 0
-          netname    = ""
-          ztype      = "IO_TYPE_ETH"
-        },
-        {
-          intfname   = "eth1"
-          intf_usage = "ADAPTER_USAGE_APP_SHARED"
-          cost       = 0
-          netname    = ""
-          ztype      = "IO_TYPE_ETH"
-        },
-      ]
+    "EEEE" = {
+      model_name = "QEMU_VM_EEEE"
+      serialno   = "SN_EEEE"
     }
   }
 }
