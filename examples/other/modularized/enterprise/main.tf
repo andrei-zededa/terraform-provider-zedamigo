@@ -6,10 +6,6 @@ output "project_name" {
   value = module.enterprise.project_name
 }
 
-output "model_name" {
-  value = module.enterprise.model_name
-}
-
 output "brand_name" {
   value = module.enterprise.brand_name
 }

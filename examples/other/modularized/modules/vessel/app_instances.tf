@@ -14,7 +14,13 @@ locals {
 resource "zedcloud_application_instance" "vm_instance" {
   for_each = local.node_app_pairs
 
-  depends_on = [zedcloud_network_instance.local_nat, zedcloud_network_instance.app_shared]
+  # Because the app-instances will match network-instances and volume-instances
+  # based on tags we need to specifically set this dependency.
+  depends_on = [
+    zedcloud_network_instance.local_nat,
+    zedcloud_network_instance.app_shared,
+    zedcloud_volume_instance.persist_vol
+  ]
 
   name      = "${each.value.app_name}_on_${module.edge_node[each.value.node_key].name}"
   title     = "Instance of ${data.zedcloud_application.enterprise[each.value.app_name].name} on ${module.edge_node[each.value.node_key].name}"
@@ -68,7 +74,7 @@ resource "zedcloud_application_instance" "vm_instance" {
   vminfo {
     cpus = 1
     mode = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].vmmode
-    vnc  = false
+    vnc  = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].enablevnc
   }
 
   drives {
@@ -82,6 +88,20 @@ resource "zedcloud_application_instance" "vm_instance" {
     target    = ""
   }
 
+  # Persistent volume drive - binds to the volume instance created in volume_instances.tf
+  drives {
+    cleartext = true
+    mountpath = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].images[1].mountpath
+    imagename = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].images[1].volumelabel
+    maxsize   = "0"
+    preserve  = true
+    readonly  = false
+    drvtype   = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].images[1].drvtype
+    target    = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].images[1].target
+  }
+
+  # This mostly handles app definitions with 2 or more interfaces. The 2nd and any
+  # subsequent interface will be connected with the network-instance with tag "app_traffic",
   dynamic "interfaces" {
     for_each = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].interfaces
     content {
@@ -91,5 +111,9 @@ resource "zedcloud_application_instance" "vm_instance" {
       netinstname = ""
       netinsttag  = interfaces.key == 0 ? { ni_local_nat = "true" } : { app_traffic = "app1" }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [custom_config]
   }
 }

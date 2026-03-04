@@ -18,6 +18,12 @@ variable "serialno" {
   type        = string
 }
 
+variable "description" {
+  description = "Description for the edge node"
+  type        = string
+  default     = ""
+}
+
 variable "onboarding_key" {
   description = "Onboarding key for the edge node"
   type        = string

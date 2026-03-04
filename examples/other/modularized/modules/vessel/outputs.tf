@@ -36,3 +36,14 @@ output "app_instances" {
     }
   }
 }
+
+output "volume_instances" {
+  description = "Map of node_key:app_name composite keys to volume instance details"
+  value = {
+    for key, vol in zedcloud_volume_instance.persist_vol : key => {
+      id    = vol.id
+      name  = vol.name
+      label = vol.label
+    }
+  }
+}

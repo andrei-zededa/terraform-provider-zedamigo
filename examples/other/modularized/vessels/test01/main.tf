@@ -17,3 +17,7 @@ output "network_instances" {
 output "app_instances" {
   value = module.vessel.app_instances
 }
+
+output "volume_instances" {
+  value = module.vessel.volume_instances
+}

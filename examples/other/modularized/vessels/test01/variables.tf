@@ -15,7 +15,7 @@ variable "ZEDEDA_CLOUD_TOKEN" {
 variable "enterprise_project_name" {
   description = "Name of the enterprise project to look up"
   type        = string
-  default     = "default_project"
+  default     = "Default-Project"
 }
 
 # Created by the "enterprise-global" terraform config, will be referenced as a
@@ -46,19 +46,19 @@ variable "nodes" {
 
   default = {
     "DDDD" = {
-      model_name = "QEMU_VM_DDDD"
+      model_name = "os_EM321-102_TYPE-M-8TB"
       serialno   = "SN_DDDD"
       apps       = { "ubuntu_vm" = {} }
     }
     "EEEE" = {
-      model_name = "QEMU_VM_EEEE"
+      model_name = "os_EM321-102_TYPE-M-8TB"
       serialno   = "SN_EEEE"
       apps = { "ubuntu_vm" = {
         "USERNAME"    = "labuser"
         "SSH_PUB_KEY" = "ssh-ed25519 AAAA..."
       } }
       vlans = {
-        ethclst = [2001, 2002]
+        eth1 = [2001, 2002]
       }
     }
   }

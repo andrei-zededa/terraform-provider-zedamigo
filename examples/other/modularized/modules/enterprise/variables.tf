@@ -1,7 +1,7 @@
 variable "project_name" {
   description = "Name for the enterprise project"
   type        = string
-  default     = "default_project"
+  default     = "Default-Project"
 }
 
 variable "ssh_pub_key" {

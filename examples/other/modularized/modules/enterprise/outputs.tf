@@ -1,17 +1,13 @@
-# Names (for vessel data source lookups).
+# Names (for vessel data source lookups)
 output "project_name" {
   description = "Project name"
-  value       = module.default_project.name
+  value       = zedcloud_project.this.name
 }
 
-output "model_name" {
-  description = "Model(s) name(s)"
-  value       = [for i in [zedcloud_model.qemu_vm_dddd, zedcloud_model.qemu_vm_eeee] : i.name]
-}
 
 output "brand_name" {
   description = "Brand name"
-  value       = zedcloud_brand.qemu.name
+  value       = zedcloud_brand.operational-services.name
 }
 
 output "image_names" {
@@ -44,17 +40,7 @@ output "network_name" {
 # IDs (for convenience).
 output "project_id" {
   description = "Project ID"
-  value       = module.default_project.id
-}
-
-output "model_id" {
-  description = "Model(s) ID(s)"
-  value       = [for i in [zedcloud_model.qemu_vm_dddd, zedcloud_model.qemu_vm_eeee] : i.id]
-}
-
-output "brand_id" {
-  description = "Brand ID"
-  value       = zedcloud_brand.qemu.id
+  value       = zedcloud_project.this.id
 }
 
 output "image_ids" {

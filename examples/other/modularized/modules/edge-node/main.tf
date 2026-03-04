@@ -2,6 +2,7 @@ resource "zedcloud_edgenode" "this" {
   name           = var.name
   title          = coalesce(var.title, var.name)
   serialno       = var.serialno
+  description    = var.description
   onboarding_key = var.onboarding_key
   model_id       = var.model_id
   project_id     = var.project_id

@@ -34,9 +34,13 @@ variable "UBUNTU_CLOUD_INIT_VARS" {
   ]
 }
 
+locals {
+  app_name = "ubuntu_vm"
+}
+
 resource "zedcloud_application" "ubuntu_vm" {
-  name  = "ubuntu_vm"
-  title = "ubuntu_vm"
+  name  = local.app_name
+  title = local.app_name
 
   networks    = 2
   origin_type = "ORIGIN_LOCAL"
@@ -47,8 +51,8 @@ resource "zedcloud_application" "ubuntu_vm" {
     app_type            = "APP_TYPE_VM"
     cpu_pinning_enabled = false
     deployment_type     = "DEPLOYMENT_TYPE_STAND_ALONE"
-    enablevnc           = true
-    name                = "ubuntu_vm"
+    enablevnc           = false
+    name                = local.app_name
     vmmode              = "HV_HVM"
 
     configuration {
@@ -97,6 +101,7 @@ resource "zedcloud_application" "ubuntu_vm" {
       }
     }
 
+    # Boot/first disk of the VM.
     images {
       cleartext   = true
       drvtype     = "HDD"
@@ -107,6 +112,19 @@ resource "zedcloud_application" "ubuntu_vm" {
       mountpath   = "/"
       ignorepurge = true
       preserve    = false
+      readonly    = false
+      target      = "Disk"
+    }
+
+    # 2nd disk of the VM.
+    images {
+      volumelabel = "persist_vol_${local.app_name}"
+      cleartext   = true
+      drvtype     = "HDD"
+      imageformat = "QCOW2"
+      mountpath   = "/data" # Actual mount path depends on the guest OS.
+      ignorepurge = false
+      preserve    = true
       readonly    = false
       target      = "Disk"
     }
