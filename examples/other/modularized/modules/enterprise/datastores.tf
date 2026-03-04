@@ -1,7 +1,7 @@
 module "datastore_ubuntu_cloud" {
   source = "../datastore"
 
-  name    = "Ubuntu_Cloud_Images${local.us_name_suffix}"
+  name    = "Ubuntu_Cloud_Images"
   ds_type = "DATASTORE_TYPE_HTTPS"
   ds_fqdn = "https://cloud-images.ubuntu.com"
   ds_path = ""
@@ -11,7 +11,7 @@ module "datastore_dockerhub" {
   count  = var.dockerhub_username != "" ? 1 : 0
   source = "../datastore"
 
-  name = "Dockerhub_with_username${local.us_name_suffix}"
+  name = "Dockerhub_with_username"
 
   # This creates a Zedcloud datastore object that will point to a container
   # registry (Dockerhub in this case as set by the `ds_fqdn` option) and with

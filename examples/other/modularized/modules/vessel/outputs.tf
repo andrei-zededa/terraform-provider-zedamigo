@@ -28,7 +28,7 @@ output "network_instances" {
 }
 
 output "app_instances" {
-  description = "Map of app instance keys to details"
+  description = "Map of node_key:app_name composite keys to app instance details"
   value = {
     for key, inst in zedcloud_application_instance.vm_instance : key => {
       id   = inst.id

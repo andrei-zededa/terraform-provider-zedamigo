@@ -54,3 +54,20 @@ variable "interfaces" {
     tags       = optional(map(string), {})
   }))
 }
+
+variable "vlan_adapters" {
+  description = "List of VLAN adapters for the edge node"
+  type = list(object({
+    logical_label    = string
+    lower_layer_name = string
+    vlan_id          = number
+    interface = object({
+      intfname                  = string
+      intf_usage                = string
+      cost                      = number
+      allow_local_modifications = bool
+      tags                      = map(string)
+    })
+  }))
+  default = []
+}

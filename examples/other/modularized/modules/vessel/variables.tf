@@ -1,8 +1,3 @@
-variable "name_suffix" {
-  description = "Suffix for ensuring unique object names within a single Zedcloud enterprise"
-  type        = string
-}
-
 variable "enterprise_project_name" {
   description = "Name of the enterprise project to look up"
   type        = string
@@ -10,11 +5,6 @@ variable "enterprise_project_name" {
 
 variable "network_name" {
   description = "Name of the enterprise default network to look up"
-  type        = string
-}
-
-variable "app_name" {
-  description = "Name of the enterprise app definition to look up"
   type        = string
 }
 
@@ -31,6 +21,8 @@ variable "nodes" {
     onboarding_key = optional(string, "")
     ssh_pub_key    = optional(string, "")
     tags           = optional(map(string), {})
+    vlans          = optional(map(list(number)), {})
+    apps           = optional(map(map(string)), {})
   }))
 }
 
@@ -45,8 +37,6 @@ variable "vessel_datastores" {
 }
 
 locals {
-  us_name_suffix = var.name_suffix == "" ? "" : "_${var.name_suffix}"
-
   # Derive edge-node interfaces automatically from the model's io_member_list
   node_interfaces = {
     for node_key, node in var.nodes : node_key => [
@@ -59,5 +49,25 @@ locals {
         tags       = {}
       }
     ]
+  }
+
+  # Flatten per-node VLAN definitions into vlan_adapters lists
+  node_vlan_adapters = {
+    for node_key, node in var.nodes : node_key => flatten([
+      for intf, vlan_ids in node.vlans : [
+        for vlan_id in vlan_ids : {
+          logical_label    = "${intf}.v${vlan_id}"
+          lower_layer_name = intf
+          vlan_id          = vlan_id
+          interface = {
+            intfname                  = "${intf}.v${vlan_id}"
+            intf_usage                = "ADAPTER_USAGE_APP_SHARED"
+            cost                      = 0
+            allow_local_modifications = false
+            tags                      = {}
+          }
+        }
+      ]
+    ])
   }
 }

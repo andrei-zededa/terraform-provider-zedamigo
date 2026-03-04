@@ -1,11 +1,11 @@
 resource "zedcloud_brand" "qemu" {
-  name        = "QEMU${local.us_name_suffix}"
+  name        = "QEMU"
   title       = "QEMU Brand"
   origin_type = "ORIGIN_LOCAL"
 }
 
 resource "zedcloud_model" "qemu_vm_dddd" {
-  name        = "QEMU_VM_DDDD${local.us_name_suffix}"
+  name        = "QEMU_VM_DDDD"
   title       = "QEMU VM Model DDDD with 4 ethernet interfaces"
   origin_type = "ORIGIN_LOCAL"
   brand_id    = zedcloud_brand.qemu.id
@@ -78,7 +78,7 @@ resource "zedcloud_model" "qemu_vm_dddd" {
 }
 
 resource "zedcloud_model" "qemu_vm_eeee" {
-  name        = "QEMU_VM_EEEE${local.us_name_suffix}"
+  name        = "QEMU_VM_EEEE"
   title       = "QEMU VM Model EEEE with 4 ethernet interfaces"
   origin_type = "ORIGIN_LOCAL"
   brand_id    = zedcloud_brand.qemu.id

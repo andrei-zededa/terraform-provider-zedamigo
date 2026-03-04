@@ -1,5 +1,5 @@
 resource "zedcloud_network" "default_network_dhcp_client" {
-  name  = "default_network_dhcp_client${local.us_name_suffix}"
+  name  = "default_network_dhcp_client"
   title = "A default network object as a IPv4 DHCP client"
   kind  = "NETWORK_KIND_V4"
 

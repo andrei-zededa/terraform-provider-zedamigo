@@ -1,6 +1,6 @@
 resource "zedcloud_image" "ubuntu_24_04" {
-  name  = "ubuntu_24_04_server_cloud${local.us_name_suffix}"
-  title = "ubuntu_24_04_server_cloud${local.us_name_suffix}"
+  name  = "ubuntu_24_04_server_cloud"
+  title = "ubuntu_24_04_server_cloud"
 
   datastore_id = module.datastore_ubuntu_cloud.id
 

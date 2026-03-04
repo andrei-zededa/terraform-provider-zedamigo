@@ -10,11 +10,6 @@ variable "ZEDEDA_CLOUD_TOKEN" {
   type        = string
 }
 
-variable "name_suffix" {
-  description = "Suffix for ensuring unique object names within the same Zedcloud enterprise; set it to the empty string if you don't need this."
-  type        = string
-}
-
 # Created by the "enterprise-global" terraform config, will be referenced as a
 # datasoource.
 variable "enterprise_project_name" {
@@ -31,14 +26,6 @@ variable "network_name" {
   default     = "default_network_dhcp_client"
 }
 
-# Created by the "enterprise-global" terraform config, will be referenced as a
-# datasoource.
-variable "app_name" {
-  description = "Name of the enterprise app definition to look up"
-  type        = string
-  default     = "ubuntu_vm"
-}
-
 variable "vessel_project_name" {
   description = "Name of the project that will be created for this vessel"
   type        = string
@@ -53,16 +40,23 @@ variable "nodes" {
     onboarding_key = optional(string, "")
     ssh_pub_key    = optional(string, "")
     tags           = optional(map(string), {})
+    vlans          = optional(map(list(number)), {})
+    apps           = optional(map(map(string)), {})
   }))
 
   default = {
     "DDDD" = {
       model_name = "QEMU_VM_DDDD"
       serialno   = "SN_DDDD"
+      apps = { "ubuntu_vm" = {} }
     }
     "EEEE" = {
       model_name = "QEMU_VM_EEEE"
       serialno   = "SN_EEEE"
+      apps = { "ubuntu_vm" = {} }
+      vlans = {
+        ethclst = [2001, 2002]
+      }
     }
   }
 }

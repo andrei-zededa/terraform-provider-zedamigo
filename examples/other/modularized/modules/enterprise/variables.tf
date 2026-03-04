@@ -1,8 +1,3 @@
-variable "name_suffix" {
-  description = "Suffix for ensuring unique object names within a single Zedcloud enterprise"
-  type        = string
-}
-
 variable "project_name" {
   description = "Name for the enterprise project"
   type        = string
@@ -20,8 +15,4 @@ variable "dockerhub_username" {
   description = "Docker Hub username. If set, a specific DockerHub datastore will be created."
   type        = string
   default     = ""
-}
-
-locals {
-  us_name_suffix = var.name_suffix == "" ? "" : "_${var.name_suffix}"
 }

@@ -21,6 +21,7 @@ data "zedcloud_network" "enterprise" {
 }
 
 data "zedcloud_application" "enterprise" {
-  name  = var.app_name
-  title = ""
+  for_each = toset(flatten([for node in var.nodes : keys(node.apps)]))
+  name     = each.value
+  title    = ""
 }

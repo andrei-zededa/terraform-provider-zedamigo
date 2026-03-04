@@ -1,6 +1,5 @@
 module "enterprise" {
-  source      = "../modules/enterprise"
-  name_suffix = var.name_suffix
+  source = "../modules/enterprise"
 }
 
 output "project_name" {

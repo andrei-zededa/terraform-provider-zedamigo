@@ -30,5 +30,23 @@ resource "zedcloud_edgenode" "this" {
     }
   }
 
+  dynamic "vlan_adapters" {
+    for_each = var.vlan_adapters
+    content {
+      logical_label    = vlan_adapters.value.logical_label
+      lower_layer_name = vlan_adapters.value.lower_layer_name
+      vlan_id          = vlan_adapters.value.vlan_id
+
+      interface {
+        allow_local_modifications = vlan_adapters.value.interface.allow_local_modifications
+        cost                      = vlan_adapters.value.interface.cost
+        intf_usage                = vlan_adapters.value.interface.intf_usage
+        intfname                  = vlan_adapters.value.interface.intfname
+
+        tags = vlan_adapters.value.interface.tags
+      }
+    }
+  }
+
   tags = var.tags
 }

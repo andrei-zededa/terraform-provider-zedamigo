@@ -1,9 +1,7 @@
 module "vessel" {
   source                  = "../../modules/vessel"
-  name_suffix             = var.name_suffix
   enterprise_project_name = var.enterprise_project_name
   network_name            = var.network_name
-  app_name                = var.app_name
   vessel_project_name     = var.vessel_project_name
   nodes                   = var.nodes
 }

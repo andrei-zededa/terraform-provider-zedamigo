@@ -5,6 +5,14 @@ terraform {
       version = ">= 2.6.0"
     }
   }
+
+  backend "http" {
+    address        = "http://192.168.192.168:9000/enterprise"
+    lock_address   = "http://192.168.192.168:9000/enterprise"
+    unlock_address = "http://192.168.192.168:9000/enterprise"
+    username       = "basic"
+    password       = "some-random-secret"
+  }
 }
 
 provider "zedcloud" {
