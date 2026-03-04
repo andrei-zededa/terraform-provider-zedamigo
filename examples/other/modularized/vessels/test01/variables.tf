@@ -48,12 +48,15 @@ variable "nodes" {
     "DDDD" = {
       model_name = "QEMU_VM_DDDD"
       serialno   = "SN_DDDD"
-      apps = { "ubuntu_vm" = {} }
+      apps       = { "ubuntu_vm" = {} }
     }
     "EEEE" = {
       model_name = "QEMU_VM_EEEE"
       serialno   = "SN_EEEE"
-      apps = { "ubuntu_vm" = {} }
+      apps = { "ubuntu_vm" = {
+        "USERNAME"    = "labuser"
+        "SSH_PUB_KEY" = "ssh-ed25519 AAAA..."
+      } }
       vlans = {
         ethclst = [2001, 2002]
       }
