@@ -14,6 +14,12 @@ users:
     ssh_authorized_keys:
       - ####SSH_PUB_KEY####
 
+# Set the default password for the created user.
+chpasswd:
+  expire: false
+  list: |
+    ####USERNAME####:####PASSWORD####
+
 # Remove all users except just the one creted and required system users.
 userdel:
   remove: true
@@ -40,8 +46,8 @@ preserve_users:
   - systemd-coredump
   - ####USERNAME####
 
-# Set password authentication to false for enhanced security.
-ssh_pwauth: false
+# Allow password authentication via SSH.
+ssh_pwauth: true
 
 # Install additional packages.
 packages:

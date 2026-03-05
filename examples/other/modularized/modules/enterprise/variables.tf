@@ -16,3 +16,10 @@ variable "dockerhub_username" {
   type        = string
   default     = ""
 }
+
+variable "app_password" {
+  description = "Default password for the app custom_config cloud-init (which creates an user)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

@@ -31,11 +31,27 @@ variable "UBUNTU_CLOUD_INIT_VARS" {
       max_length = "200"
       value      = ""
     },
+    {
+      name       = "PASSWORD"
+      default    = ""
+      required   = false
+      label      = "Default password for the cloud-init created user."
+      format     = "VARIABLE_FORMAT_TEXT"
+      encode     = "FILE_ENCODING_UNSPECIFIED"
+      max_length = "200"
+      value      = ""
+    },
   ]
 }
 
 locals {
   app_name = "ubuntu_vm"
+
+  cloud_init_vars = [
+    for v in var.UBUNTU_CLOUD_INIT_VARS : merge(v, {
+      default = v.name == "PASSWORD" ? var.app_password : v.default
+    })
+  ]
 }
 
 resource "zedcloud_application" "ubuntu_vm" {
@@ -86,7 +102,7 @@ resource "zedcloud_application" "ubuntu_vm" {
           # generated. This is needed so that we don't duplicate the list of
           # variables for the app definition and the app instance.
           dynamic "variables" {
-            for_each = var.UBUNTU_CLOUD_INIT_VARS
+            for_each = local.cloud_init_vars
             content {
               name       = variables.value.name
               default    = variables.value.default
@@ -95,6 +111,7 @@ resource "zedcloud_application" "ubuntu_vm" {
               format     = variables.value.format
               encode     = variables.value.encode
               max_length = variables.value.max_length
+              value      = variables.value.value
             }
           }
         }
@@ -110,7 +127,7 @@ resource "zedcloud_application" "ubuntu_vm" {
       imagename   = zedcloud_image.ubuntu_24_04.name
       maxsize     = "20971520"
       mountpath   = "/"
-      ignorepurge = true
+      ignorepurge = false
       preserve    = false
       readonly    = false
       target      = "Disk"
@@ -119,11 +136,11 @@ resource "zedcloud_application" "ubuntu_vm" {
     # 2nd disk of the VM.
     images {
       volumelabel = "persist_vol_${local.app_name}"
-      cleartext   = true
+      cleartext   = false
       drvtype     = "HDD"
       imageformat = "QCOW2"
       mountpath   = "/data" # Actual mount path depends on the guest OS.
-      ignorepurge = false
+      ignorepurge = true
       preserve    = true
       readonly    = false
       target      = "Disk"

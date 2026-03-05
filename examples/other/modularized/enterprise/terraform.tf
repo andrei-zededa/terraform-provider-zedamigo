@@ -4,6 +4,9 @@ terraform {
       source  = "zededa/zedcloud"
       version = ">= 2.6.0"
     }
+    terracurl = {
+      source = "devops-rob/terracurl"
+    }
   }
 
   backend "http" {
