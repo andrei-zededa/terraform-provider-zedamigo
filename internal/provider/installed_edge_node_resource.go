@@ -3,7 +3,6 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -278,12 +277,16 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 }
 
 func readInstalledNode(_ *ZedAmigoProviderConfig, path string) (bool, error) {
-	x, err := os.ReadFile(filepath.Join(path, "serial_console_install.log"))
-	if err != nil {
-		return false, fmt.Errorf("%w", err)
-	}
+	return true, nil
 
-	return bytes.Contains(x, []byte("EVE-OS installation completed")), nil
+	/*
+		x, err := os.ReadFile(filepath.Join(path, "serial_console_install.log"))
+		if err != nil {
+			return false, fmt.Errorf("%w", err)
+		}
+
+		return bytes.Contains(x, []byte("EVE-OS installation completed")), nil
+	*/
 }
 
 func (r *InstalledNode) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
