@@ -16,7 +16,7 @@ resource "zedcloud_model" "QEMU_VM" {
   }
   product_status = "production"
   state          = "SYS_MODEL_STATE_ACTIVE"
-  type           = "AMD64"
+  type           = upper(var.EDGE_NODE_ARCH)
 
   io_member_list {
     assigngrp    = "eth0"
