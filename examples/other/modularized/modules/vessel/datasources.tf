@@ -20,6 +20,14 @@ data "zedcloud_network" "enterprise" {
   title = ""
 }
 
+data "zedcloud_network" "interface_net" {
+  for_each = toset(flatten([
+    for node in var.nodes : values(node.interface_networks)
+  ]))
+  name  = each.value
+  title = ""
+}
+
 data "zedcloud_application" "enterprise" {
   for_each = toset(flatten([for node in var.nodes : keys(node.apps)]))
   name     = each.value

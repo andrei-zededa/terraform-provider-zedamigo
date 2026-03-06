@@ -19,7 +19,9 @@ variable "enterprise_project_name" {
 }
 
 # Created by the "enterprise-global" terraform config, will be referenced as a
-# datasoource.
+# datasoource. This will be used by default as the network configuration for
+# an edge-node interface unless it is overridden by the `interface_networks`
+# map in the `nodes` configuration.
 variable "network_name" {
   description = "Name of the enterprise default network to look up"
   type        = string
@@ -35,13 +37,14 @@ variable "vessel_project_name" {
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
-    model_name     = string
-    serialno       = string
-    onboarding_key = optional(string, "")
-    ssh_pub_key    = optional(string, "")
-    tags           = optional(map(string), {})
-    vlans          = optional(map(list(number)), {})
-    apps           = optional(map(map(string)), {})
+    model_name         = string
+    serialno           = string
+    onboarding_key     = optional(string, "")
+    ssh_pub_key        = optional(string, "")
+    tags               = optional(map(string), {})
+    vlans              = optional(map(list(number)), {})
+    apps               = optional(map(map(string)), {})
+    interface_networks = optional(map(string), {})
   }))
 
   default = {
@@ -59,6 +62,9 @@ variable "nodes" {
       } }
       vlans = {
         eth1 = [2001, 2002]
+      }
+      interface_networks = {
+        eth0 = "default_network_dhcp_client"
       }
     }
   }

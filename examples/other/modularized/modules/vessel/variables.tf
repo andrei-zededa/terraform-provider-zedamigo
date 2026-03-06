@@ -16,13 +16,14 @@ variable "vessel_project_name" {
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
-    model_name     = string
-    serialno       = string
-    onboarding_key = optional(string, "")
-    ssh_pub_key    = optional(string, "")
-    tags           = optional(map(string), {})
-    vlans          = optional(map(list(number)), {})
-    apps           = optional(map(map(string)), {})
+    model_name         = string
+    serialno           = string
+    onboarding_key     = optional(string, "")
+    ssh_pub_key        = optional(string, "")
+    tags               = optional(map(string), {})
+    vlans              = optional(map(list(number)), {})
+    apps               = optional(map(map(string)), {})
+    interface_networks = optional(map(string), {})
   }))
 }
 
@@ -44,7 +45,7 @@ locals {
         intfname   = io.logicallabel
         intf_usage = io.usage
         cost       = io.cost
-        netname    = ""
+        netname    = contains(keys(node.interface_networks), io.logicallabel) ? data.zedcloud_network.interface_net[node.interface_networks[io.logicallabel]].name : data.zedcloud_network.enterprise.name
         ztype      = io.ztype
         tags       = {}
       }

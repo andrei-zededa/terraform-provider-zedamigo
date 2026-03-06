@@ -1,3 +1,5 @@
+# TODO: Add back models outputs.
+
 # Names (for vessel data source lookups)
 output "project_name" {
   description = "Project name"
