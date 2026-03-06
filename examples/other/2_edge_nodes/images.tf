@@ -48,9 +48,9 @@ resource "zedcloud_image" "ubuntu_24_04_test" {
   image_type       = "IMAGE_TYPE_APPLICATION"
 }
 
-resource "zedcloud_image" "ubuntu_24_04_server_cloud" {
-  name  = "ubuntu_24_04_server_cloud_${var.config_suffix}"
-  title = "ubuntu_24_04_server_cloud_${var.config_suffix}"
+resource "zedcloud_image" "ubuntu_24_04_server_cloud_amd64" {
+  name  = "ubuntu_24_04_server_cloud_amd64_${var.config_suffix}"
+  title = "ubuntu_24_04_server_cloud_amd64_${var.config_suffix}"
 
   datastore_id = zedcloud_datastore.UBUNTU_CLOUD_IMAGES.id
 
@@ -66,6 +66,26 @@ resource "zedcloud_image" "ubuntu_24_04_server_cloud" {
   image_size_bytes = 618925568
   image_type       = "IMAGE_TYPE_APPLICATION"
 }
+
+resource "zedcloud_image" "ubuntu_24_04_server_cloud_arm64" {
+  name  = "ubuntu_24_04_server_cloud_arm64_${var.config_suffix}"
+  title = "ubuntu_24_04_server_cloud_arm64_${var.config_suffix}"
+
+  datastore_id = zedcloud_datastore.UBUNTU_CLOUD_IMAGES.id
+
+  # The resulting URL for downloading the image will calculated by the edge-node as: 
+  #     ${ds_fqdn}/${ds_path}/${image_rel_url}
+  #
+  # So in this case, considering the `Local_HTTP_Server_8080` datastore it will be:
+  #     http://192.168.192.168:8080/images_datastore/ubuntu_24_04_with_modbus_disk_999MB.qcow2
+  image_rel_url    = "noble/current/noble-server-cloudimg-arm64.img"
+  image_format     = "QCOW2"
+  image_arch       = "ARM64"
+  image_sha256     = "99E1D482B958E6BFD0183A4C48CE6DC334E09A3E29A4560F6F5FF85593D09D1D"
+  image_size_bytes = 618925568
+  image_type       = "IMAGE_TYPE_APPLICATION"
+}
+
 
 resource "zedcloud_image" "ROOTFS_14_5_0_LTS" {
   #### This is wrong, the image name MUST be equal to the version.
