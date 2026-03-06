@@ -6,6 +6,7 @@ package hypervisor
 
 import (
 	"context"
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,7 +25,15 @@ import (
 type VFKitHypervisor struct {
 	VfkitPath   string
 	QemuImgPath string
+	GvproxyPath string
 }
+
+const (
+	gvproxyGuestIP = "192.168.127.2"                // gvproxy default DHCP lease
+	gvproxyMAC     = "5a:94:ef:e4:0c:ee"            // MAC tied to that DHCP lease
+	gvproxyPollInterval = 100 * time.Millisecond
+	gvproxyPollTimeout  = 3 * time.Second
+)
 
 func (h *VFKitHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPaths, error) {
 	var paths VMPaths
@@ -118,6 +127,82 @@ func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst str
 	}
 }
 
+// startGvproxy launches gvproxy as a detached process with port forwarding and
+// returns the unix socket path for vfkit to connect to.
+func (h *VFKitHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (string, error) {
+	d := conf.ResourceDir
+	socketPath := filepath.Join(d, "vfkit.sock")
+	pidFile := filepath.Join(d, "gvproxy.pid")
+
+	args := []string{
+		"-listen-vfkit", fmt.Sprintf("unixgram://%s", socketPath),
+		"-pid-file", pidFile,
+	}
+
+	// Port forwards: SSHPort->22, SSHPort+1->10022, SSHPort+2->10080.
+	sshPort := int(conf.SSHPort)
+	forwards := []struct{ host, guest int }{
+		{sshPort, 22},
+		{sshPort + 1, 10022},
+		{sshPort + 2, 10080},
+	}
+	for _, fwd := range forwards {
+		args = append(args, "-forward",
+			fmt.Sprintf("tcp://0.0.0.0:%d/%s:%d", fwd.host, gvproxyGuestIP, fwd.guest))
+	}
+
+	tflog.Debug(ctx, "Starting gvproxy", map[string]any{"args": args})
+
+	res, err := cmd.RunDetached(d, h.GvproxyPath, args...)
+	if err != nil {
+		return "", fmt.Errorf("failed to start gvproxy: %w; %s", err, res.Stderr)
+	}
+
+	// Write PID file in case gvproxy's -pid-file flag hasn't written it yet.
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+		return "", fmt.Errorf("failed to write gvproxy PID file: %w", err)
+	}
+
+	// Poll for the socket file to appear.
+	deadline := time.Now().Add(gvproxyPollTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(socketPath); err == nil {
+			tflog.Debug(ctx, "gvproxy socket ready", map[string]any{"path": socketPath})
+			return socketPath, nil
+		}
+		time.Sleep(gvproxyPollInterval)
+	}
+
+	return "", fmt.Errorf("gvproxy socket %s did not appear within %s", socketPath, gvproxyPollTimeout)
+}
+
+// stopGvproxy sends SIGTERM to the gvproxy process.
+func (h *VFKitHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
+	pidFile := filepath.Join(resourceDir, "gvproxy.pid")
+	pidBytes, err := os.ReadFile(pidFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			tflog.Debug(ctx, "Failed to read gvproxy PID file", map[string]any{"error": err})
+		}
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		tflog.Debug(ctx, "Invalid gvproxy PID", map[string]any{"error": err})
+		return
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		tflog.Debug(ctx, "SIGTERM to gvproxy failed (may already be stopped)", map[string]any{"error": err})
+	}
+}
+
 func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths) error {
 	d := conf.ResourceDir
 
@@ -171,12 +256,28 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 		}
 	}
 
-	// Default NAT networking.
-	netDev, err := vfconfig.VirtioNetNew("")
-	if err != nil {
-		return fmt.Errorf("configure network: %w", err)
+	// Networking: use gvproxy with port forwarding for running VMs,
+	// simple NAT for installation VMs.
+	var socketPath string
+	if !conf.IsInstallation && conf.SSHPort != 0 {
+		var gvErr error
+		socketPath, gvErr = h.startGvproxy(ctx, conf)
+		if gvErr != nil {
+			return fmt.Errorf("start gvproxy: %w", gvErr)
+		}
+		netDev, err := vfconfig.VirtioNetNew(gvproxyMAC)
+		if err != nil {
+			return fmt.Errorf("configure network: %w", err)
+		}
+		netDev.SetUnixSocketPath(socketPath)
+		devices = append(devices, netDev)
+	} else {
+		netDev, err := vfconfig.VirtioNetNew("")
+		if err != nil {
+			return fmt.Errorf("configure network: %w", err)
+		}
+		devices = append(devices, netDev)
 	}
-	devices = append(devices, netDev)
 
 	// Entropy.
 	rngDev, err := vfconfig.VirtioRngNew()
@@ -185,17 +286,8 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	}
 	devices = append(devices, rngDev)
 
-	// Serial: log to file.
-	serialLogPath := paths.SerialConsoleLog
-	if serialLogPath == "" {
-		if conf.IsInstallation {
-			serialLogPath = filepath.Join(d, "serial_console_install.log")
-		} else {
-			serialLogPath = filepath.Join(d, "serial_console_run.log")
-		}
-		paths.SerialConsoleLog = serialLogPath
-	}
-	serialDev, err := vfconfig.VirtioSerialNew(serialLogPath)
+	// Serial: use PTY so users can interactively connect to the console.
+	serialDev, err := vfconfig.VirtioSerialNewPty()
 	if err != nil {
 		return fmt.Errorf("configure serial: %w", err)
 	}
@@ -211,9 +303,15 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	}
 
 	// Write debug script.
-	blob := []byte(fmt.Sprintf("#!/usr/bin/env bash\n\nset -eu;\n\n#### VFKIT ARGS: %v\n\n%s %s\n",
-		args, h.VfkitPath, strings.Join(args, " ")))
-	if err := os.WriteFile(paths.DebugScript, blob, 0o755); err != nil {
+	var debugScript string
+	if socketPath != "" {
+		debugScript = fmt.Sprintf("#!/usr/bin/env bash\n\nset -eu;\n\n#### GVPROXY (started separately, see gvproxy.pid)\n#### VFKIT ARGS: %v\n\n%s %s\n",
+			args, h.VfkitPath, strings.Join(args, " "))
+	} else {
+		debugScript = fmt.Sprintf("#!/usr/bin/env bash\n\nset -eu;\n\n#### VFKIT ARGS: %v\n\n%s %s\n",
+			args, h.VfkitPath, strings.Join(args, " "))
+	}
+	if err := os.WriteFile(paths.DebugScript, []byte(debugScript), 0o755); err != nil {
 		tflog.Debug(ctx, "Failed to write start VM script", map[string]any{"error": err})
 	}
 
@@ -228,12 +326,21 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 		if err != nil {
 			return fmt.Errorf("failed to start vfkit VM: %w; %s", err, res.Stderr)
 		}
+		// Write vfkit PID file.
+		if err := os.WriteFile(paths.PIDFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+			return fmt.Errorf("failed to write vfkit PID file: %w", err)
+		}
+		// Extract the PTY path from vfkit's stderr log so the user can connect.
+		if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
+			ptyFile := filepath.Join(d, "serial.pty")
+			if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
+				tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
+			}
+			tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
+		} else {
+			tflog.Warn(ctx, "Could not determine serial PTY path from vfkit output", map[string]any{"error": err, "stderr_log": res.Logs.Stderr})
+		}
 	}
-
-	// Write PID file (RunDetached doesn't produce one for vfkit, read from process).
-	// For detached mode, we need to find the PID. RunDetached uses cmd.Start(),
-	// so the PID file may need to be populated differently. For now, find the vfkit process.
-	// Note: In practice, we rely on the PID file being written or on process discovery.
 
 	return nil
 }
@@ -295,7 +402,37 @@ func (h *VFKitHypervisor) Stop(ctx context.Context, resourceDir string) error {
 	// Give it time to shut down.
 	time.Sleep(2 * time.Second)
 
+	// Stop gvproxy if it was running.
+	h.stopGvproxy(ctx, resourceDir)
+
 	return nil
+}
+
+// parsePtyPath reads a vfkit stderr log file and extracts the PTY device path
+// from the line: level=info msg="Using PTY (pty path: /dev/ttys003)"
+func parsePtyPath(logFile string) (string, error) {
+	f, err := os.Open(logFile)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		const marker = "pty path: "
+		idx := strings.Index(line, marker)
+		if idx < 0 {
+			continue
+		}
+		rest := line[idx+len(marker):]
+		// The path is followed by a closing paren.
+		if end := strings.Index(rest, ")"); end > 0 {
+			return rest[:end], nil
+		}
+		return strings.TrimSpace(rest), nil
+	}
+	return "", fmt.Errorf("PTY path not found in log file %s", logFile)
 }
 
 // parseMemoryToMiB converts memory strings like "4G", "4096M", "4096" to MiB.
