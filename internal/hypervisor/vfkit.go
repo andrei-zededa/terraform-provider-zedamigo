@@ -6,6 +6,7 @@ package hypervisor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,13 +75,47 @@ func (h *VFKitHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPa
 	return paths, nil
 }
 
-// convertToRaw converts a qcow2 image to raw format using qemu-img.
-func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst string) error {
-	res, err := cmd.Run(logDir, h.QemuImgPath, "convert", "-f", "qcow2", "-O", "raw", src, dst)
+// imageInfo holds the subset of qemu-img info JSON output we need.
+type imageInfo struct {
+	Format string `json:"format"`
+}
+
+// detectImageFormat returns the disk image format (e.g. "raw", "qcow2") using qemu-img info.
+func (h *VFKitHypervisor) detectImageFormat(logDir, src string) (string, error) {
+	res, err := cmd.Run(logDir, h.QemuImgPath, "info", "--output=json", src)
 	if err != nil {
-		return fmt.Errorf("qemu-img convert failed: %w; %s", err, res.Stderr)
+		return "", fmt.Errorf("qemu-img info failed: %w; %s", err, res.Stderr)
 	}
-	return nil
+	var info imageInfo
+	if err := json.Unmarshal([]byte(res.Stdout), &info); err != nil {
+		return "", fmt.Errorf("failed to parse qemu-img info output: %w", err)
+	}
+	return info.Format, nil
+}
+
+// convertToRaw converts a disk image to raw format using qemu-img, or copies it if already raw.
+func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst string) error {
+	format, err := h.detectImageFormat(logDir, src)
+	if err != nil {
+		return err
+	}
+
+	switch format {
+	case "raw":
+		tflog.Debug(ctx, "Source image is already raw, copying instead of converting", map[string]any{"src": src, "dst": dst})
+		if _, err := cmd.CopyFile(src, dst); err != nil {
+			return fmt.Errorf("failed to copy raw image: %w", err)
+		}
+		return nil
+	case "qcow2":
+		res, err := cmd.Run(logDir, h.QemuImgPath, "convert", "-f", "qcow2", "-O", "raw", src, dst)
+		if err != nil {
+			return fmt.Errorf("qemu-img convert failed: %w; %s", err, res.Stderr)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported disk image format %q; expected raw or qcow2", format)
+	}
 }
 
 func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths) error {

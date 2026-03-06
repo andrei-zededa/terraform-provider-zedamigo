@@ -204,10 +204,8 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       cleartext   = true
       drvtype     = "HDD"
       imageformat = "QCOW2"
-      # imageid     = zedcloud_image.ubuntu_24_04_test.id
-      # imagename   = zedcloud_image.ubuntu_24_04_test.name
-      imageid     = zedcloud_image.ubuntu_24_04_server_cloud.id
-      imagename   = zedcloud_image.ubuntu_24_04_server_cloud.name
+      imageid     = zedcloud_image.ubuntu_24_04_server_cloud_arm64.id
+      imagename   = zedcloud_image.ubuntu_24_04_server_cloud_arm64.name
       maxsize     = "10485760"
       mountpath   = "/"
       ignorepurge = true
