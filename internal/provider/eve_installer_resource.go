@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -51,6 +52,7 @@ type EveInstallerModel struct {
 	SSHKey   types.String `tfsdk:"authorized_keys"`
 	GrubCfg  types.String `tfsdk:"grub_cfg"`
 	DPCOver  types.String `tfsdk:"device_port_config_override"`
+	Format   types.String `tfsdk:"format"`
 	Filename types.String `tfsdk:"filename"`
 }
 
@@ -64,12 +66,12 @@ func (r *EveInstaller) Metadata(ctx context.Context, req resource.MetadataReques
 
 func (r *EveInstaller) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "EVE-OS Installer ISO",
+		Description: "EVE-OS Installer (ISO or RAW)",
 		MarkdownDescription: undent.Md(`
-		It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+		It creates a custom EVE-OS installer (in ISO or RAW format) by running
 		the corresponding lfedge/eve container image according to [Get a custom EVE-OS image](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5) .
-		It supports all the customizations that the EVE-OS installer supports. the
-		resulting file can be used as the |installer_iso| attribute of a |zedamigo_installed_edge_node|
+		It supports all the customizations that the EVE-OS installer supports. The
+		resulting file can be used as the |installer_iso| or |installer_raw| attribute of a |zedamigo_installed_edge_node|
 		resource.`),
 
 		Attributes: map[string]schema.Attribute{
@@ -135,6 +137,16 @@ func (r *EveInstaller) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Optional:            true,
 				Required:            false,
 			},
+			"format": schema.StringAttribute{
+				Description:         "Installer image format: \"iso\" (default) or \"raw\"",
+				MarkdownDescription: "Installer image format: `iso` (default) or `raw`",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("iso"),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 			"filename": schema.StringAttribute{
 				Description:         "Full path/filename of the resulting installer file",
 				MarkdownDescription: "Full path/filename of the resulting installer file",
@@ -169,6 +181,16 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	format := data.Format.ValueString()
+	if format != "iso" && format != "raw" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("format"),
+			"Invalid format",
+			fmt.Sprintf("format must be \"iso\" or \"raw\", got %q", format),
+		)
 		return
 	}
 
@@ -274,16 +296,16 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 		"-v", fmt.Sprintf("%s:/in", filepath.Join(d, "config")),
 		"-v", fmt.Sprintf("%s:/out", filepath.Join(d, "out")),
 		fmt.Sprintf("docker.io/lfedge/eve:%s", data.Tag.ValueString()),
-		"-f", "raw", "installer_iso")
+		"-f", "raw", fmt.Sprintf("installer_%s", format))
 	if err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
-			"Unable to create a new installer iso")
+			fmt.Sprintf("Unable to create a new installer %s", format))
 		resp.Diagnostics.Append(res.Diagnostics()...)
 		return
 	}
 
-	i := fmt.Sprintf("%s.custom_installer.iso", filepath.Join(d, data.Name.ValueString()))
-	if err := os.Rename(filepath.Join(d, "out", "installer.iso"), i); err != nil {
+	i := fmt.Sprintf("%s.custom_installer.%s", filepath.Join(d, data.Name.ValueString()), format)
+	if err := os.Rename(filepath.Join(d, "out", fmt.Sprintf("installer.%s", format)), i); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to move installer file: %v", err))
 		return
@@ -291,10 +313,10 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 
 	tflog.Trace(ctx, "EVE-OS Installer Resource created succesfully")
 
-	j, err := readEveInstaller(r.providerConf, d, data.Name.ValueString())
+	j, err := readEveInstaller(r.providerConf, d, data.Name.ValueString(), format)
 	if err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Read Error",
-			fmt.Sprintf("Can't read back installer iso resource: %v", err))
+			fmt.Sprintf("Can't read back installer %s resource: %v", format, err))
 		return
 	}
 	data.Filename = types.StringValue(j)
@@ -303,8 +325,8 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func readEveInstaller(_ *ZedAmigoProviderConfig, path, name string) (string, error) {
-	i := fmt.Sprintf("%s.custom_installer.iso", filepath.Join(path, name))
+func readEveInstaller(_ *ZedAmigoProviderConfig, path, name, format string) (string, error) {
+	i := fmt.Sprintf("%s.custom_installer.%s", filepath.Join(path, name), format)
 
 	return i, nil
 }
@@ -319,10 +341,10 @@ func (r *EveInstaller) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	i, err := readEveInstaller(r.providerConf, r.getResourceDir(data.ID.ValueString()),
-		data.Name.ValueString())
+		data.Name.ValueString(), data.Format.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Read Error",
-			fmt.Sprintf("Can't read back installer iso resource: %v", err))
+			fmt.Sprintf("Can't read back installer %s resource: %v", data.Format.ValueString(), err))
 		return
 	}
 	data.Filename = types.StringValue(i)

@@ -46,6 +46,7 @@ type InstalledNodeModel struct {
 	Name             types.String `tfsdk:"name"`
 	SerialNo         types.String `tfsdk:"serial_no"`
 	InstallerISO     types.String `tfsdk:"installer_iso"`
+	InstallerRaw     types.String `tfsdk:"installer_raw"`
 	DiskImgBase      types.String `tfsdk:"disk_image_base"`
 	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
 	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
@@ -94,8 +95,14 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"installer_iso": schema.StringAttribute{
 				Description:         "Installed Edge Node EVE-OS Installer ISO file",
 				MarkdownDescription: "Installed Edge Node EVE-OS Installer ISO file",
-				Optional:            false,
-				Required:            true,
+				Optional:            true,
+				Required:            false,
+			},
+			"installer_raw": schema.StringAttribute{
+				Description:         "Installed Edge Node EVE-OS Installer RAW file (mutually exclusive with installer_iso)",
+				MarkdownDescription: "Installed Edge Node EVE-OS Installer RAW file (mutually exclusive with installer_iso)",
+				Optional:            true,
+				Required:            false,
 			},
 			"disk_image_base": schema.StringAttribute{
 				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
@@ -170,6 +177,34 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// Validate installer_iso and installer_raw mutual exclusion
+	isISO := !data.InstallerISO.IsNull() && len(data.InstallerISO.ValueString()) > 0
+	isRaw := !data.InstallerRaw.IsNull() && len(data.InstallerRaw.ValueString()) > 0
+
+	if !isISO && !isRaw {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("installer_iso"),
+			"Missing Required Attribute",
+			"Either 'installer_iso' or 'installer_raw' must be set. Exactly one is required.",
+		)
+		return
+	}
+
+	if isISO && isRaw {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("installer_iso"),
+			"Invalid Attribute Combination",
+			"Cannot set both 'installer_iso' and 'installer_raw' at the same time. Please set only one.",
+		)
+		return
+	}
+
+	// Determine which installer file to use.
+	instFileOpts := []string{"-cdrom", data.InstallerISO.ValueString()}
+	if isRaw {
+		instFileOpts = []string{"-drive", fmt.Sprintf("file=%s,format=raw", data.InstallerRaw.ValueString())}
 	}
 
 	u, err := uuid.NewV4()
@@ -251,8 +286,8 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		disks = append(disks, []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i2nd)}...)
 	}
 	qemuArgs = append(qemuArgs, disks...)
+	qemuArgs = append(qemuArgs, instFileOpts...)
 	qemuArgs = append(qemuArgs, []string{
-		"-cdrom", data.InstallerISO.ValueString(),
 		"-boot", "once=d",
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
 		"-pidfile", filepath.Join(d, "qemu.pid"),
