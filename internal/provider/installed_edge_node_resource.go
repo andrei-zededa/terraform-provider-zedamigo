@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -201,12 +201,6 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	// Determine which installer file to use.
-	instFileOpts := []string{"-cdrom", data.InstallerISO.ValueString()}
-	if isRaw {
-		instFileOpts = []string{"-drive", fmt.Sprintf("file=%s,format=raw", data.InstallerRaw.ValueString())}
-	}
-
 	u, err := uuid.NewV4()
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
@@ -229,113 +223,48 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
-	i := filepath.Join(d, "disk0.disk_img.qcow2")
-	res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2",
-		"-b", data.DiskImgBase.ValueString(), "-F", "qcow2", i)
+
+	vmConf := hypervisor.VMConfig{
+		Name:           data.Name.ValueString(),
+		ID:             data.ID.ValueString(),
+		SerialNo:       data.SerialNo.ValueString(),
+		ResourceDir:    d,
+		DiskImageBase:  data.DiskImgBase.ValueString(),
+		Disk1ImageBase: data.Disk1ImgBase.ValueString(),
+		Nic0:           nic0FmtInstall,
+		SwTPMSocket:    data.SwTPMSock.ValueString(),
+		SerialToFile:   filepath.Join(d, "serial_console_install.log"),
+		IsInstallation: true,
+	}
+
+	if isISO {
+		vmConf.InstallerISO = data.InstallerISO.ValueString()
+	} else {
+		vmConf.InstallerRaw = data.InstallerRaw.ValueString()
+	}
+
+	// Prepare disks.
+	paths, err := r.providerConf.Hypervisor.PrepareDisks(ctx, vmConf)
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
-			"Unable to create a new disk image")
-		resp.Diagnostics.Append(res.Diagnostics()...)
+			fmt.Sprintf("Failed to prepare disks: %v", err))
 		return
 	}
-	i2nd := ""
-	data.Disk1Img = types.StringValue("")
-	if !data.Disk1ImgBase.IsNull() && len(data.Disk1ImgBase.ValueString()) > 0 {
-		i2nd = filepath.Join(d, "disk1.disk_img.qcow2")
-		res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2",
-			"-b", data.Disk1ImgBase.ValueString(), "-F", "qcow2", i2nd)
-		if err != nil {
-			resp.Diagnostics.AddError("Installed Edge Node Resource Error",
-				"Unable to create a new disk image")
-			resp.Diagnostics.Append(res.Diagnostics()...)
-			return
-		}
-	}
 
-	varsFile := filepath.Join(d, "UEFI_OVMF_VARS.bin")
-	if _, err := cmd.CopyFile(r.providerConf.BaseOVMFVars, varsFile); err != nil {
+	data.OvmfVars = types.StringValue(paths.OVMFVars)
+	data.SerialConsoleLog = types.StringValue(vmConf.SerialToFile)
+
+	// Start VM (runs synchronously for installation).
+	if err := r.providerConf.Hypervisor.Start(ctx, vmConf, paths); err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
-			fmt.Sprintf("Unable to copy UEFI OVMF vars: %s", err))
-	}
-	data.OvmfVars = types.StringValue(varsFile)
-
-	data.SerialConsoleLog = types.StringValue(filepath.Join(d, "serial_console_install.log"))
-
-	qemuArgs := []string{}
-	if !data.Name.IsNull() {
-		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_install_%s", data.Name.ValueString())}...)
-	} else {
-		qemuArgs = append(qemuArgs, []string{"--name", fmt.Sprintf("edge_node_install_%s", data.ID.ValueString())}...)
-	}
-
-	qemuArgs = append(qemuArgs, []string{
-		"--enable-kvm", "-machine", "q35,accel=kvm,kernel-irqchip=split",
-		"-nographic",
-		"-m", "4096",
-		"-cpu", "host", "-smp", "4,cores=2",
-		"-device", "intel-iommu,intremap=on",
-		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", data.SerialNo.ValueString()),
-		"-serial", fmt.Sprintf("file:%s", data.SerialConsoleLog.ValueString()),
-		"-drive", fmt.Sprintf("if=pflash,format=raw,readonly=on,file=%s", r.providerConf.BaseOVMFCode),
-		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", varsFile),
-		"-nic", nic0FmtInstall,
-	}...)
-
-	disks := []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i)}
-	if len(i2nd) > 0 {
-		disks = append(disks, []string{"-drive", fmt.Sprintf("file=%s,format=qcow2", i2nd)}...)
-	}
-	qemuArgs = append(qemuArgs, disks...)
-	qemuArgs = append(qemuArgs, instFileOpts...)
-	qemuArgs = append(qemuArgs, []string{
-		"-boot", "once=d",
-		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(d, "qmp.socket")),
-		"-pidfile", filepath.Join(d, "qemu.pid"),
-	}...)
-
-	swtpmSock := data.SwTPMSock.ValueString()
-	if swtpmSock != "" {
-		qemuArgs = append(qemuArgs, []string{
-			// Define the character device connected to the swtpm socket.
-			"-chardev", fmt.Sprintf("socket,id=chrtpm,path=%s", swtpmSock),
-			// Define the TPM backend device using the character device.
-			"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",
-			// Add the virtual TPM device to the VM (use tpm-crb for TPM 2.0).
-			"-device", "tpm-crb,id=mytpm,tpmdev=tpm0",
-			/*
-				-chardev socket,id=chrtpm,path=/tmp/mytpm1/swtpm-sock \
-				-tpmdev emulator,id=tpm0,chardev=chrtpm \
-				-device tpm-tis,tpmdev=tpm0 test.img
-			*/
-		}...)
-	}
-
-	res, err = cmd.Run(d, r.providerConf.Qemu, qemuArgs...)
-	if err != nil {
-		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
-			"Failed to run QEMU VM for installing EVE-OS")
-		resp.Diagnostics.Append(res.Diagnostics()...)
+			fmt.Sprintf("Failed to run installation VM: %v", err))
 		return
 	}
 
 	tflog.Trace(ctx, "Installed Edge Node Resource created succesfully")
 
-	j, err := readDiskImage(r.providerConf, d, "disk0")
-	if err != nil {
-		resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
-			fmt.Sprintf("Can't read back installed edge node disk: %v", err))
-		return
-	}
-	data.DiskImg = types.StringValue(j.Filename)
-	if len(i2nd) > 0 {
-		j, err := readDiskImage(r.providerConf, d, "disk1")
-		if err != nil {
-			resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
-				fmt.Sprintf("Can't read back installed edge node disk: %v", err))
-			return
-		}
-		data.Disk1Img = types.StringValue(j.Filename)
-	}
+	data.DiskImg = types.StringValue(paths.DiskImage)
+	data.Disk1Img = types.StringValue(paths.Disk1Image)
 
 	success, err := readInstalledNode(r.providerConf, d)
 	if err != nil {
