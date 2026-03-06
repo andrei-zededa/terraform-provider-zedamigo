@@ -68,7 +68,8 @@ resource "zedcloud_image" "ubuntu_24_04_server_cloud" {
 }
 
 resource "zedcloud_image" "ROOTFS_14_5_0_LTS" {
-  name  = "14.5.0-lts-kvm-amd64"
+  #### This is wrong, the image name MUST be equal to the version.
+  name  = "14.5.0-lts-kvm-amd64_${var.config_suffix}"
   title = "14.5.0-lts-kvm-amd64"
 
   datastore_id = zedcloud_datastore.GITHUB_LFEDGE_EVE_RELEASES.id
@@ -82,7 +83,8 @@ resource "zedcloud_image" "ROOTFS_14_5_0_LTS" {
 }
 
 resource "zedcloud_image" "ROOTFS_14_5_1_LTS" {
-  name  = "14.5.1-lts-kvm-amd64"
+  #### This is wrong, the image name MUST be equal to the version.
+  name  = "14.5.1-lts-kvm-amd64_${var.config_suffix}"
   title = "14.5.1-lts-kvm-amd64"
 
   datastore_id = zedcloud_datastore.GITHUB_LFEDGE_EVE_RELEASES.id

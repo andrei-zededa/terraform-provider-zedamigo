@@ -4,7 +4,6 @@ package provider
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/adrg/xdg"
 
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 )
 
@@ -33,12 +33,6 @@ const (
 	DefaultZedAmigoLibPath = "zedamigo"
 )
 
-// Embed OVMF files.
-//
-//go:embed embedded_ovmf/OVMF_CODE.fd
-//go:embed embedded_ovmf/OVMF_VARS.fd
-var embeddedOVMF embed.FS
-
 // Ensure ZedAmigoProvider satisfies various provider interfaces.
 var (
 	_ provider.Provider = &ZedAmigoProvider{}
@@ -49,20 +43,17 @@ var (
 // the exact paths of various commands(executables) that are needed by the various
 // resources of the provider.
 type ZedAmigoProviderConfig struct {
-	Target       string
-	LibPath      string
-	BaseOVMFCode string
-	BaseOVMFVars string
-	UseSudo      bool
-	Sudo         string
-	Qemu         string
-	QemuImg      string
-	Docker       string
-	Swtpm        string
-	Bash         string
-	GenISOImage  string
-	IP           string
-	Taskset      string
+	Target      string
+	LibPath     string
+	UseSudo     bool
+	Sudo        string
+	QemuImg     string // Used by disk_image_resource
+	Docker      string
+	Swtpm       string
+	Bash        string
+	GenISOImage string
+	IP          string
+	Hypervisor  hypervisor.Hypervisor
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -209,32 +200,6 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 
-	if err := os.MkdirAll(filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("lib_path"),
-			fmt.Sprintf("%s", err),
-			fmt.Sprintf("Failed to create ZedAmigo lib_path/embedded_ovmf directory: %v", err),
-		)
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	for _, f := range []string{filepath.Join("embedded_ovmf", "OVMF_CODE.fd"), filepath.Join("embedded_ovmf", "OVMF_VARS.fd")} {
-		if err := extractFileIfNotExists(f, filepath.Join(zaConf.LibPath, f)); err != nil {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("lib_path"),
-				fmt.Sprintf("%s", err),
-				fmt.Sprintf("Failed to extract OVMF file '%s': %v", f, err),
-			)
-		}
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.BaseOVMFCode = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_CODE.fd")
-	zaConf.BaseOVMFVars = filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_VARS.fd")
-
 	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
 		zaConf.UseSudo = true
 		sudo, err := exec.LookPath("sudo")
@@ -246,58 +211,6 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 			return
 		}
 		zaConf.Sudo = sudo
-
-		// TODO: Might want to add here a symlink resolv step.
-	}
-
-	q, err := exec.LookPath("qemu-system-x86_64")
-	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `qemu-system-x86_64` executable.",
-			fmt.Sprintf("Can't find the `qemu-system-x86_64` executable, got error: %v", err))
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.Qemu = q
-
-	qi, err := exec.LookPath("qemu-img")
-	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `qemu-img` executable.",
-			fmt.Sprintf("Can't find the `qemu-img` executable, got error: %v", err))
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.QemuImg = qi
-
-	do, err := exec.LookPath("docker")
-	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `docker` executable.",
-			fmt.Sprintf("Can't find the `docker` executable, got error: %v", err))
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.Docker = do
-
-	st, err := exec.LookPath("swtpm")
-	if err != nil {
-		resp.Diagnostics.AddWarning("Can't find the `swtpm` executable.",
-			fmt.Sprintf("This warning can be ignored if you DO NOT use the SwTPM resource. Can't find `swtpm`, got error: %v", err))
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.Swtpm = st
-	if stAbs, err := filepath.Abs(st); err != nil {
-		tflog.Debug(ctx, "filepath.Abs error", map[string]any{"error": err})
-	} else {
-		zaConf.Swtpm = stAbs
-		if stReal, err := filepath.EvalSymlinks(stAbs); err != nil {
-			tflog.Debug(ctx, "filepath.EvalSymlinks error", map[string]any{"error": err})
-		} else {
-			zaConf.Swtpm = stReal
-		}
 	}
 
 	bash, err := exec.LookPath("bash")
@@ -310,35 +223,21 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	}
 	zaConf.Bash = bash
 
-	ip, err := exec.LookPath("ip")
+	do, err := exec.LookPath("docker")
 	if err != nil {
-		resp.Diagnostics.AddError("Can't find `ip`.",
-			fmt.Sprintf("Can't find `ip`, got error: %v", err))
+		resp.Diagnostics.AddError("Can't find the `docker` executable.",
+			fmt.Sprintf("Can't find the `docker` executable, got error: %v", err))
 	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	zaConf.IP = ip
+	zaConf.Docker = do
 
-	gencmd, err := exec.LookPath("genisoimage")
-	if err != nil {
-		resp.Diagnostics.AddWarning("Can't find the `genisoimage` executable (part of the `cdrkit` package or the `genisoimage` package).",
-			fmt.Sprintf("This warning can be ignored if you DO NOT use the Cloud Init ISO resource. Can't find `genisoimage`, got error: %v", err))
-	}
+	// Platform-specific tool lookups and hypervisor creation.
+	configurePlatformTools(ctx, &zaConf, resp)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	zaConf.GenISOImage = gencmd
-
-	taskset, err := exec.LookPath("taskset")
-	if err != nil {
-		resp.Diagnostics.AddWarning("Can't find the `taskset` executable.",
-			fmt.Sprintf("This warning can be ignored if you DO NOT use the cpu_pins feature. Can't find `taskset`, got error: %v", err))
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	zaConf.Taskset = taskset
 
 	// Make the provider config available during DataSource and Resource
 	// type Configure methods.
@@ -383,27 +282,3 @@ func New(version string) func() provider.Provider {
 	}
 }
 
-// extractFileIfNotExists checks if a file exists at targetPath, and if not,
-// extracts it from the embedded filesystem.
-func extractFileIfNotExists(embeddedPath, targetPath string) error {
-	// Check if file already exists
-	if _, err := os.Stat(targetPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error checking if file exists: %w", err)
-	}
-
-	// File doesn't exist, so extract it.
-	// Read the embedded file.
-	data, err := embeddedOVMF.ReadFile(embeddedPath)
-	if err != nil {
-		return fmt.Errorf("error reading embedded file %s: %w", embeddedPath, err)
-	}
-
-	// Write the file to the target path.
-	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
-		return fmt.Errorf("error writing file to %s: %w", targetPath, err)
-	}
-
-	return nil
-}
