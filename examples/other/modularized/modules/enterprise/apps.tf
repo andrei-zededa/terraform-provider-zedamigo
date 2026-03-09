@@ -67,7 +67,7 @@ resource "zedcloud_application" "ubuntu_vm" {
     app_type            = "APP_TYPE_VM"
     cpu_pinning_enabled = false
     deployment_type     = "DEPLOYMENT_TYPE_STAND_ALONE"
-    enablevnc           = false
+    enablevnc           = true
     name                = local.app_name
     vmmode              = "HV_HVM"
 

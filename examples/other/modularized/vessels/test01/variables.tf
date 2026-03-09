@@ -49,17 +49,20 @@ variable "nodes" {
 
   default = {
     "DDDD" = {
-      model_name = "os_EM321-102_TYPE-M-8TB"
-      serialno   = "SN_DDDD"
-      apps       = { "ubuntu_vm" = {} }
+      model_name  = "os_EM321-102_TYPE-M-8TB"
+      serialno    = "SN_DDDD"
+      ssh_pub_key = "ssh-ed25519 AAAA.... user@example.net"
+      apps = {
+        "ubuntu_vm" = {
+          "USERNAME"    = "labtest"
+          "SSH_PUB_KEY" = "ssh-ed25519 AAAA.... user@example.net"
+        }
+      }
     }
     "EEEE" = {
       model_name = "os_EM321-102_TYPE-M-8TB"
       serialno   = "SN_EEEE"
-      apps = { "ubuntu_vm" = {
-        "USERNAME"    = "labuser"
-        "SSH_PUB_KEY" = "ssh-ed25519 AAAA..."
-      } }
+      apps       = { "ubuntu_vm" = {} }
       vlans = {
         eth1 = [2001, 2002]
       }

@@ -6,11 +6,11 @@ resource "zedcloud_volume_instance" "persist_vol" {
 
   device_id = module.edge_node[each.value.node_key].id
 
-  size_bytes  = tostring(100 * 1024 * 1024) # 100MB
-  type        = "VOLUME_INSTANCE_TYPE_EMPTYDIR"
+  size_bytes  = tostring(10 * 1024 * 1024 * 1024) # 10GB 
+  type        = "VOLUME_INSTANCE_TYPE_BLOCKSTORAGE"
   accessmode  = "VOLUME_INSTANCE_ACCESS_MODE_READWRITE"
   multiattach = false
-  cleartext   = true
+  cleartext   = false
 
   label = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].images[1].volumelabel
 
