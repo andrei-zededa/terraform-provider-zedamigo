@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,8 +25,29 @@ import (
 
 // VFKitHypervisor implements Hypervisor using vfkit (Apple Virtualization.framework).
 type VFKitHypervisor struct {
-	VfkitPath   string
-	QemuImgPath string
+	VfkitPath          string
+	QemuImgPath        string
+	SupportsNestedVirt bool
+}
+
+// SupportsNestedVirtualization checks if the CPU is Apple M3 or later
+// by parsing `sysctl -n machdep.cpu.brand_string` (e.g. "Apple M3 Pro").
+func SupportsNestedVirtualization() (supported bool, cpuBrand string) {
+	out, err := exec.Command("sysctl", "-n", "machdep.cpu.brand_string").Output()
+	if err != nil {
+		return false, "unknown"
+	}
+	brand := strings.TrimSpace(string(out))
+	re := regexp.MustCompile(`Apple M(\d+)`)
+	matches := re.FindStringSubmatch(brand)
+	if len(matches) < 2 {
+		return false, brand
+	}
+	gen, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return false, brand
+	}
+	return gen >= 3, brand
 }
 
 const (
@@ -226,7 +249,7 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	// UEFI boot.
 	bootloader := vfconfig.NewEFIBootloader(paths.OVMFVars, true)
 	vm := vfconfig.NewVirtualMachine(cpus, memMiB, bootloader)
-	vm.Nested = true
+	vm.Nested = h.SupportsNestedVirt
 
 	// Root disk.
 	rootDisk, err := vfconfig.VirtioBlkNew(paths.DiskImage)

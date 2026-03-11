@@ -8,6 +8,7 @@ package hypervisor
 // It exists so that the type can be referenced in shared code for documentation
 // purposes, but it should never be instantiated on these platforms.
 type VFKitHypervisor struct {
-	VfkitPath   string
-	QemuImgPath string
+	VfkitPath          string
+	QemuImgPath        string
+	SupportsNestedVirt bool
 }

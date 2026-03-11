@@ -57,9 +57,25 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 	// ip command not available on macOS, leave zaConf.IP empty.
 	// Networking resources that need `ip` will need platform-specific handling.
 
+	// Detect nested virtualization support (requires Apple M3+).
+	supportsNested, cpuBrand := hypervisor.SupportsNestedVirtualization()
+
 	// Create vfkit hypervisor. gvproxy is embedded (self-invoked).
 	zaConf.Hypervisor = &hypervisor.VFKitHypervisor{
-		VfkitPath:   vfkit,
-		QemuImgPath: qi,
+		VfkitPath:          vfkit,
+		QemuImgPath:        qi,
+		SupportsNestedVirt: supportsNested,
+	}
+
+	if !supportsNested {
+		resp.Diagnostics.AddWarning(
+			"Nested virtualization not available",
+			fmt.Sprintf(
+				"Detected CPU: %s. Nested virtualization requires Apple M3 or later. "+
+					"VMs will run without nested virtualization, which means app instances "+
+					"inside EVE-OS will not work. Consider upgrading to an M3+ Mac for full functionality.",
+				cpuBrand,
+			),
+		)
 	}
 }
