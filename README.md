@@ -229,7 +229,7 @@ or `~/.terraformrc`) then this might fail.
 The install script should finish with a message like `OpenTofu has been successfully initialized!`.
 
 ```shell
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.6.0/install.sh | bash -s
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.8.0/install.sh | bash -s
 ```
 
 ```shell
