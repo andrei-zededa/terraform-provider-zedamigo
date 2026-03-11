@@ -51,7 +51,14 @@ of the VM. These might be useful if the an edge-app-instance is configured with 
 10022 or 10080 of the edge node (EVE-OS) to ports of the edge-app-instance. Note that in this case to access an
 edge-app-instance from the host 2 levels of port forwards are involved.
 - `ovmf_vars_src` (String) UEFI OVMF vars source file (likely from the corresponding installed edge node)
-- `serial_port_server` (Boolean) Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file
+- `serial_port_server` (Boolean) Configure the edge-node serial port as a UNIX socket server.
+
+  **Linux (QEMU):** When `true`, the serial port is exposed as a UNIX socket server and a socket tailer
+  process is launched to also log serial output to a file. When `false`, serial output is written directly
+  to a log file.
+
+  **macOS (vfkit):** This setting is ignored — serial output is always written directly to a log file because
+  vfkit does not support socket-based serial devices. The `serial_console_log` attribute will always be populated.
 - `swtpm_socket` (String) swtpm process unix socket
 
 ### Read-Only
@@ -61,7 +68,17 @@ edge-app-instance from the host 2 levels of port forwards are involved.
 - `id` (String) Edge Node (or VM) identifier
 - `ovmf_vars` (String) UEFI OVMF vars file specific for this edge node
 - `qmp_socket` (String) UNIX socket for QEMU QMP for this edge node VM
-- `serial_console_log` (String) Edge Node log file of serial console output if serial_port_server is false
-- `serial_port_socket` (String) If serial_port_server is true then this will contain the file path of the UNIX socket for the serial port server
+- `serial_console_log` (String) Edge Node log file of serial console output.
+
+  **Linux (QEMU):** Populated when `serial_port_server` is `false`, or when `serial_port_server` is `true`
+  (the socket tailer also writes output to this file).
+
+  **macOS (vfkit):** Always populated — serial output is written directly to this file regardless of the
+  `serial_port_server` setting.
+- `serial_port_socket` (String) File path of the UNIX socket for the serial port server.
+
+  **Linux (QEMU):** Populated when `serial_port_server` is `true`.
+
+  **macOS (vfkit):** Always empty because vfkit does not support socket-based serial devices.
 - `ssh_port` (Number) Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed
 - `vm_running` (Boolean) Running state of the QEMU VM for this edge node

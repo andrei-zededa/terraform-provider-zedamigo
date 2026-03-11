@@ -33,6 +33,7 @@ type Result struct {
 	MatchedString string
 	Completed     bool
 	TimedOut      bool
+	PID           int // populated by RunDetached with the child process PID
 }
 
 func (r Result) Diagnostics() diag.Diagnostics {

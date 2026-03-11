@@ -18,7 +18,7 @@ variable "edge_node_ssh_pub_key" {
 # ensure that.
 variable "config_suffix" {
   type    = string
-  default = "1234"
+  default = "tn17"
 }
 
 # Defined as a variable in the Github repo.
@@ -42,4 +42,12 @@ variable "DOCKERHUB_IMAGE_LATEST_TAG" {
   sensitive = false
   type      = string
   default   = "latest"
+}
+
+# EDGE_NODE_ARCH is the architecture (`amd64` or `arm64`) of the edge-nodes,
+# this will be used in the model but also for selecting which EVE-OS installer
+# to use and can be used for edge-app-instance images as well.
+variable "EDGE_NODE_ARCH" {
+  type    = string
+  default = "amd64"
 }

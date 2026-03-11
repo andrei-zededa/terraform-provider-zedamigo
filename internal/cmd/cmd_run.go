@@ -163,6 +163,8 @@ func RunDetached(logPath string, command string, args ...string) (Result, error)
 		return result, result.Error
 	}
 
+	result.PID = cmd.Process.Pid
+
 	// Wait a bit to give time to the command to write something to it's
 	// stdout/stderr if it wants. TODO: It is unclear if the FD's are
 	// closed when the current process exists, therefore it is unclear if

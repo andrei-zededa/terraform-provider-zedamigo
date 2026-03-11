@@ -38,8 +38,8 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   tags = {}
@@ -66,8 +66,8 @@ resource "zedcloud_edgenode" "ENODE_TEST_BBBB" {
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   tags = {}
@@ -82,9 +82,10 @@ resource "zedamigo_disk_image" "empty_disk_100G" {
 
 #### This creates a custom EVE-OS installer ISO, it basically runs
 #### `docker run ... lfedge/eve installer_iso`.
-resource "zedamigo_eve_installer" "eve_os_installer_iso_1343" {
-  name            = "EVE-OS_13.4.3-lts-kvm-amd64"
-  tag             = "13.4.3-lts-kvm-amd64"
+resource "zedamigo_eve_installer" "eve_os_installer_1453" {
+  format          = "raw"
+  name            = "EVE-OS_14.5.3-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "14.5.3-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -94,9 +95,10 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1343" {
    EOF
 }
 
-resource "zedamigo_eve_installer" "eve_os_installer_iso_1450" {
-  name            = "EVE-OS_14.5.0-lts-kvm-amd64"
-  tag             = "14.5.0-lts-kvm-amd64"
+resource "zedamigo_eve_installer" "eve_os_installer_1600" {
+  format          = "raw"
+  name            = "EVE-OS_16.0.0-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "16.0.0-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -111,14 +113,14 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1450" {
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
   name            = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
   serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso_1343.filename
+  installer_raw   = zedamigo_eve_installer.eve_os_installer_1453.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
   name            = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
   serial_no       = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
-  installer_iso   = zedamigo_eve_installer.eve_os_installer_iso_1450.filename
+  installer_raw   = zedamigo_eve_installer.eve_os_installer_1600.filename
   disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
 }
 
@@ -157,6 +159,7 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.disk_image
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.ovmf_vars
+  use_gvproxy        = true
 }
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
@@ -167,4 +170,5 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.disk_image
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.ovmf_vars
+  use_gvproxy        = true
 }
