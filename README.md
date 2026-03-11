@@ -7,9 +7,13 @@ and are represented as [edge-nodes](https://help.zededa.com/hc/en-us/articles/44
 in a [ZEDEDA Cloud instance](https://zededa.com/products/how-it-works/), also
 known as a Zedcloud cluster or server.
 
-*zedamigo* ONLY works on a bare-metal Linux system because most usecases involve
-nested virtualization. Starting VMs which are running EVE-OS and EVE-OS starts VMs
-which are running the [edge-app-instances](https://help.zededa.com/hc/en-us/articles/4440266233243-Manage-an-Edge-Application-Instance#h_01HV7H05VXB8WN1TF78Y72EEWG).
+*zedamigo* works on bare-metal Linux (amd64) and macOS (Apple Silicon, arm64).
+On Linux it uses QEMU/KVM, on macOS it uses [vfkit](https://github.com/crc-org/vfkit)
+(Apple Virtualization.framework). Nested virtualization on macOS requires Apple M3 or later.
+
+Most usecases involve nested virtualization: starting VMs which are running EVE-OS
+and EVE-OS starts VMs which are running the
+[edge-app-instances](https://help.zededa.com/hc/en-us/articles/4440266233243-Manage-an-Edge-Application-Instance#h_01HV7H05VXB8WN1TF78Y72EEWG).
 
 *zedamigo* can be used as a simple QEMU VM *manager* for any VM quests. But it
 is most useful when those VM guests are running EVE-OS since then it can be
@@ -17,6 +21,20 @@ used together with the [zedcloud terraform provider](https://help.zededa.com/hc/
 [zedcloud provider docs](https://registry.terraform.io/providers/zededa/zedcloud/latest/docs)
 and the setup can be managed end-to-end from a single terraform configuration
 (both the VMs representing the edge-nodes but also all the Zedcloud objects).
+
+## Dependencies
+
+| Dependency | Linux | macOS | Required? | Purpose |
+|---|:---:|:---:|---|---|
+| docker | Yes | Yes | Required | EVE-OS installer ISO generation |
+| qemu-system-x86_64 | Yes | -- | Required (Linux) | VM hypervisor |
+| qemu-img | Yes | Yes | Required | Disk image operations |
+| vfkit | -- | Yes | Required (macOS) | VM hypervisor (Virtualization.framework) |
+| ip (iproute2) | Yes | -- | Required (Linux) | Networking resources |
+| bash | Yes | Yes | Required | Script execution |
+| swtpm | Yes | Yes | Optional | SwTPM resource |
+| genisoimage | Yes | Yes | Optional | Cloud Init ISO resource |
+| taskset | Yes | -- | Optional | CPU pinning |
 
 ## Common workflow example
 
@@ -167,6 +185,33 @@ uid=1000(ubnt) gid=1000(ubnt) groups=1000(ubnt),4(adm),24(cdrom),27(sudo),30(dip
 ❯ sudo usermod -aG docker $(whoami)
 ```
 
+## Setup on macOS (Apple Silicon)
+
+### Install QEMU and vfkit
+
+```shell
+brew install qemu vfkit
+```
+
+### Optional dependencies
+
+```shell
+# SwTPM support
+brew install swtpm
+
+# Cloud Init ISO support (provides mkisofs)
+brew install cdrtools
+```
+
+### Install Docker
+
+Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/) or use an alternative like colima.
+
+### Limitations
+
+- Networking resources (`bridge`, `tap`, `vlan`, `dhcp_server`, `dhcp6_server`, `radv`) are **not supported** on macOS.
+- Nested virtualization (EVE-OS running VMs inside the VM) requires **Apple M3 or later**.
+
 ### Install the zedamigo terraform provider locally
 
 zedamigo works well both with *terraform* and *OpenTofu* (recent versions).
@@ -184,7 +229,7 @@ or `~/.terraformrc`) then this might fail.
 The install script should finish with a message like `OpenTofu has been successfully initialized!`.
 
 ```shell
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.6.0/install.sh | sh -s
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.6.0/install.sh | bash -s
 ```
 
 ```shell
@@ -232,25 +277,23 @@ commands will detect it and remind you to do so if necessary.
 Each resource implemented by the zedamigo provider has documentation auto-generated
 from the source code in the [docs/](docs/) folder.
 
-> NOTE: currently *macOS* support is just planned, nothing works.
-
 | Resource | Linux (amd64) | macOS (arm64) | Notes |
-|---       |:---:          |:---:          |---    |
-| [disk_image](docs/resources/disk_image.md) | ✅ | ❌ | |
-| [eve_installer](docs/resources/eve_installer.md) | ✅ | ❌ | |
-| [installed_edge_node](docs/resources/installed_edge_node.md) | ✅ | ❌ | |
-| [edge_node](docs/resources/edge_node.md) | ✅ | ❌ | |
-| [local_datastore](docs/resources/local_datastore.md) | ✅ | ❌ | Really just a simple Go web server |
-| [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ❌ | If `genisoimage` is installed |
-| [bridge](docs/resources/bridge.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [tap](docs/resources/tap.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [vlan](docs/resources/vlan.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [dhcp6_server](docs/resources/dhcp6_server.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [radv](docs/resources/radv.md) | ✅ | ❌ | Needs `use_sudo = true` |
-| [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ❌ | It's just an alias for edge_node |
-| [vm](docs/resources/vm.md) | ✅ | ❌ | It's just an alias for edge_node |
-| [swtpm](docs/resources/swtpm.md) | ❌ | ❌ | WIP, currently not working |
+|---|:---:|:---:|---|
+| [disk_image](docs/resources/disk_image.md) | ✅ | ✅ | |
+| [eve_installer](docs/resources/eve_installer.md) | ✅ | ✅ | Requires docker |
+| [installed_edge_node](docs/resources/installed_edge_node.md) | ✅ | ✅ | |
+| [edge_node](docs/resources/edge_node.md) | ✅ | ✅ | |
+| [local_datastore](docs/resources/local_datastore.md) | ✅ | ✅ | Embedded Go HTTP server |
+| [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ✅ | Requires `genisoimage` |
+| [bridge](docs/resources/bridge.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [tap](docs/resources/tap.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [vlan](docs/resources/vlan.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [dhcp6_server](docs/resources/dhcp6_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [radv](docs/resources/radv.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ✅ | Alias for edge_node |
+| [vm](docs/resources/vm.md) | ✅ | ✅ | Alias for edge_node |
+| [swtpm](docs/resources/swtpm.md) | WIP | WIP | |
 
 ## Troubleshooting
 
