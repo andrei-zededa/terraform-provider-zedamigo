@@ -5,8 +5,8 @@
 package hypervisor
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,8 +28,8 @@ type VFKitHypervisor struct {
 }
 
 const (
-	gvproxyGuestIP = "192.168.127.2"                // gvproxy default DHCP lease
-	gvproxyMAC     = "5a:94:ef:e4:0c:ee"            // MAC tied to that DHCP lease
+	gvproxyGuestIP      = "192.168.127.2"     // gvproxy default DHCP lease
+	gvproxyMAC          = "5a:94:ef:e4:0c:ee" // MAC tied to that DHCP lease
 	gvproxyPollInterval = 100 * time.Millisecond
 	gvproxyPollTimeout  = 3 * time.Second
 )
@@ -289,8 +289,17 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	}
 	devices = append(devices, rngDev)
 
-	// Serial: use PTY so users can interactively connect to the console.
-	serialDev, err := vfconfig.VirtioSerialNewPty()
+	// Serial console.
+	var serialDev vfconfig.VirtioDevice
+	serialLogPath := conf.SerialToFile
+	if serialLogPath == "" {
+		serialLogPath = paths.SerialConsoleLog
+	}
+	if serialLogPath != "" {
+		serialDev, err = vfconfig.VirtioSerialNew(serialLogPath)
+	} else {
+		serialDev, err = vfconfig.VirtioSerialNewPty()
+	}
 	if err != nil {
 		return fmt.Errorf("configure serial: %w", err)
 	}
@@ -333,15 +342,17 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 		if err := os.WriteFile(paths.PIDFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 			return fmt.Errorf("failed to write vfkit PID file: %w", err)
 		}
-		// Extract the PTY path from vfkit's stderr log so the user can connect.
-		if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
-			ptyFile := filepath.Join(d, "serial.pty")
-			if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
-				tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
+		if serialLogPath == "" {
+			// PTY mode: extract the PTY path from vfkit's stderr log so the user can connect.
+			if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
+				ptyFile := filepath.Join(d, "serial.pty")
+				if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
+					tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
+				}
+				tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
+			} else {
+				tflog.Warn(ctx, "Could not determine serial PTY path from vfkit output", map[string]any{"error": err, "stderr_log": res.Logs.Stderr})
 			}
-			tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
-		} else {
-			tflog.Warn(ctx, "Could not determine serial PTY path from vfkit output", map[string]any{"error": err, "stderr_log": res.Logs.Stderr})
 		}
 	}
 

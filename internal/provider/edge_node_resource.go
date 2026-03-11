@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
@@ -134,20 +135,39 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Required: false,
 			},
 			"serial_port_server": schema.BoolAttribute{
-				Description:         "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
-				MarkdownDescription: "Configure the edge-node serial port as a telnet server; if false then serial port output is logged to a file",
-				Optional:            true,
-				Required:            false,
+				Description: `Configure the edge-node serial port as a UNIX socket server. ` +
+					`On Linux (QEMU), when true the serial port is exposed as a UNIX socket server and a socket tailer process ` +
+					`is launched to also log serial output to a file. When false, serial output is written directly to a log file. ` +
+					`On macOS (vfkit), this setting is ignored — serial output is always written directly to a log file because ` +
+					`vfkit does not support socket-based serial devices. The serial_console_log attribute will always be populated.`,
+				MarkdownDescription: "Configure the edge-node serial port as a UNIX socket server.\n\n" +
+					"**Linux (QEMU):** When `true`, the serial port is exposed as a UNIX socket server and a socket tailer " +
+					"process is launched to also log serial output to a file. When `false`, serial output is written directly " +
+					"to a log file.\n\n" +
+					"**macOS (vfkit):** This setting is ignored — serial output is always written directly to a log file because " +
+					"vfkit does not support socket-based serial devices. The `serial_console_log` attribute will always be populated.",
+				Optional: true,
+				Required: false,
 			},
 			"serial_port_socket": schema.StringAttribute{
-				Description:         "If serial_port_server is true then this will contain the file path of the UNIX socket for the serial port server",
-				MarkdownDescription: "If serial_port_server is true then this will contain the file path of the UNIX socket for the serial port server",
-				Computed:            true,
+				Description: `File path of the UNIX socket for the serial port server. ` +
+					`On Linux (QEMU), this is populated when serial_port_server is true. ` +
+					`On macOS (vfkit), this is always empty because vfkit does not support socket-based serial devices.`,
+				MarkdownDescription: "File path of the UNIX socket for the serial port server.\n\n" +
+					"**Linux (QEMU):** Populated when `serial_port_server` is `true`.\n\n" +
+					"**macOS (vfkit):** Always empty because vfkit does not support socket-based serial devices.",
+				Computed: true,
 			},
 			"serial_console_log": schema.StringAttribute{
-				Description:         "Edge Node log file of serial console output if serial_port_server is false",
-				MarkdownDescription: "Edge Node log file of serial console output if serial_port_server is false",
-				Computed:            true,
+				Description: `Edge Node log file of serial console output. ` +
+					`On Linux (QEMU), populated when serial_port_server is false, or when serial_port_server is true (the socket tailer writes output to this file). ` +
+					`On macOS (vfkit), always populated — serial output is written directly to this file regardless of the serial_port_server setting.`,
+				MarkdownDescription: "Edge Node log file of serial console output.\n\n" +
+					"**Linux (QEMU):** Populated when `serial_port_server` is `false`, or when `serial_port_server` is `true` " +
+					"(the socket tailer also writes output to this file).\n\n" +
+					"**macOS (vfkit):** Always populated — serial output is written directly to this file regardless of the " +
+					"`serial_port_server` setting.",
+				Computed: true,
 			},
 			"disk_image_base": schema.StringAttribute{
 				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
@@ -400,7 +420,8 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	tflog.Trace(ctx, "Edge Node Resource created succesfully")
 
 	// Launch socket tailer if serial_port_server is true.
-	if data.SerialPortServer.ValueBool() {
+	// On MacOS (vfkit), serial output goes directly to a file — no socket tailer needed.
+	if data.SerialPortServer.ValueBool() && runtime.GOOS != "darwin" {
 		res, err := cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
 		if err != nil {
 			resp.Diagnostics.AddError("Edge Node Resource Error",
