@@ -25,7 +25,6 @@ import (
 type VFKitHypervisor struct {
 	VfkitPath   string
 	QemuImgPath string
-	GvproxyPath string
 }
 
 const (
@@ -127,38 +126,42 @@ func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst str
 	}
 }
 
-// startGvproxy launches gvproxy as a detached process with port forwarding and
-// returns the unix socket path for vfkit to connect to.
+// startGvproxy launches gvproxy (via self-invocation) as a detached process
+// with port forwarding and returns the unix socket path for vfkit to connect to.
 func (h *VFKitHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (string, error) {
 	d := conf.ResourceDir
 	socketPath := filepath.Join(d, "vfkit.sock")
 	pidFile := filepath.Join(d, "gvproxy.pid")
 
-	args := []string{
-		"-listen-vfkit", fmt.Sprintf("unixgram://%s", socketPath),
-		"-pid-file", pidFile,
-	}
-
-	// Port forwards: SSHPort->22, SSHPort+1->10022, SSHPort+2->10080.
+	// Build comma-separated forwards string.
 	sshPort := int(conf.SSHPort)
 	forwards := []struct{ host, guest int }{
 		{sshPort, 22},
 		{sshPort + 1, 10022},
 		{sshPort + 2, 10080},
 	}
+	var fwdParts []string
 	for _, fwd := range forwards {
-		args = append(args, "-forward",
-			fmt.Sprintf("tcp://0.0.0.0:%d/%s:%d", fwd.host, gvproxyGuestIP, fwd.guest))
+		fwdParts = append(fwdParts,
+			fmt.Sprintf("0.0.0.0:%d/%s:%d", fwd.host, gvproxyGuestIP, fwd.guest))
+	}
+	forwardStr := strings.Join(fwdParts, ",")
+
+	args := []string{
+		"-pid-file", pidFile,
+		"-gvproxy",
+		"-gp.listen-vfkit", fmt.Sprintf("unixgram://%s", socketPath),
+		"-gp.forwards", forwardStr,
 	}
 
-	tflog.Debug(ctx, "Starting gvproxy", map[string]any{"args": args})
+	tflog.Debug(ctx, "Starting gvproxy (self-invoke)", map[string]any{"args": args})
 
-	res, err := cmd.RunDetached(d, h.GvproxyPath, args...)
+	res, err := cmd.RunDetached(d, os.Args[0], args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to start gvproxy: %w; %s", err, res.Stderr)
 	}
 
-	// Write PID file in case gvproxy's -pid-file flag hasn't written it yet.
+	// Write PID file in case gvproxy hasn't written it yet.
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write gvproxy PID file: %w", err)
 	}

@@ -184,9 +184,6 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
   name  = "ubuntu_test_vm_${var.config_suffix}"
   title = "ubuntu_test_vm_${var.config_suffix}"
 
-  # App config including manifest created by first creating it using a manifest.json
-  # (which can be exported with `zcli`) and then `terraform state show ...` on that.
-
   networks    = 3
   origin_type = "ORIGIN_LOCAL"
 
@@ -204,9 +201,9 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       cleartext   = true
       drvtype     = "HDD"
       imageformat = "QCOW2"
-      imageid     = zedcloud_image.ubuntu_24_04_server_cloud_arm64.id
-      imagename   = zedcloud_image.ubuntu_24_04_server_cloud_arm64.name
-      maxsize     = "10485760"
+      imageid     = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.id : zedcloud_image.ubuntu_24_04_server_cloud_amd64.id
+      imagename   = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.name : zedcloud_image.ubuntu_24_04_server_cloud_amd64.name
+      maxsize     = "0"
       mountpath   = "/"
       ignorepurge = true
       preserve    = false

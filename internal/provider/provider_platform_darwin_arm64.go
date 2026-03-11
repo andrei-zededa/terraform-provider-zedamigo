@@ -54,21 +54,12 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 	}
 	zaConf.GenISOImage = gencmd
 
-	// gvproxy provides user-space networking with port forwarding for vfkit VMs.
-	gvproxy, err := exec.LookPath("gvproxy")
-	if err != nil {
-		resp.Diagnostics.AddError("Can't find the `gvproxy` executable.",
-			fmt.Sprintf("Can't find the `gvproxy` executable. Install via: brew install gvproxy. Got error: %v", err))
-		return
-	}
-
 	// ip command not available on macOS, leave zaConf.IP empty.
 	// Networking resources that need `ip` will need platform-specific handling.
 
-	// Create vfkit hypervisor.
+	// Create vfkit hypervisor. gvproxy is embedded (self-invoked).
 	zaConf.Hypervisor = &hypervisor.VFKitHypervisor{
 		VfkitPath:   vfkit,
 		QemuImgPath: qi,
-		GvproxyPath: gvproxy,
 	}
 }

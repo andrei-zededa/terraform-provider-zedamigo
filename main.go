@@ -66,6 +66,11 @@ var (
 	httpBwLimit   = flag.String("hs.bw-limit", "2GB", "HTTP server: bandwidth limit (e.g., '2m', '2mb', '2M', '2MB')")
 	httpUsername  = flag.String("hs.username", "", "HTTP server: username for HTTP basic auth (empty disables auth)")
 	httpPassword  = flag.String("hs.password", "", "HTTP server: password for HTTP basic auth")
+
+	gvproxyMode       = flag.Bool("gvproxy", false, "Run the binary in 'gvproxy' mode (embedded user-space networking)")
+	gvproxyListenVfkit = flag.String("gp.listen-vfkit", "", "gvproxy: vfkit unixgram socket URI (e.g. unixgram:///path/to/sock)")
+	gvproxyListenQemu  = flag.String("gp.listen-qemu", "", "gvproxy: QEMU unix socket URI (e.g. unix:///path/to/sock)")
+	gvproxyForwards    = flag.String("gp.forwards", "", "gvproxy: comma-separated forwards (hostAddr:port/guestAddr:port,...)")
 )
 
 func main() {
@@ -151,6 +156,12 @@ func main() {
 	if *httpServer {
 		// Run in "HTTP server" mode and NOT the normal terraform provider mode.
 		os.Exit(int(httpServerMain()))
+	}
+
+	if *gvproxyMode {
+		// Run in "gvproxy" mode (embedded user-space networking).
+		gvproxyMain()
+		os.Exit(0)
 	}
 
 	opts := providerserver.ServeOpts{

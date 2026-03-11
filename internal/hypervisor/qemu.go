@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
@@ -25,6 +27,93 @@ type QEMUHypervisor struct {
 	TasksetPath  string
 	UseSudo      bool
 	SudoPath     string
+}
+
+const (
+	qemuGvproxyGuestIP      = "192.168.127.2"
+	qemuGvproxyMAC          = "5a:94:ef:e4:0c:ee"
+	qemuGvproxyPollInterval = 100 * time.Millisecond
+	qemuGvproxyPollTimeout  = 3 * time.Second
+)
+
+// startGvproxy launches gvproxy (via self-invocation) as a detached process
+// with port forwarding and returns the unix socket path for QEMU to connect to.
+func (h *QEMUHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (string, error) {
+	d := conf.ResourceDir
+	socketPath := filepath.Join(d, "gvproxy-qemu.sock")
+	pidFile := filepath.Join(d, "gvproxy.pid")
+
+	// Build comma-separated forwards string.
+	sshPort := int(conf.SSHPort)
+	forwards := []struct{ host, guest int }{
+		{sshPort, 22},
+		{sshPort + 1, 10022},
+		{sshPort + 2, 10080},
+	}
+	var fwdParts []string
+	for _, fwd := range forwards {
+		fwdParts = append(fwdParts,
+			fmt.Sprintf("0.0.0.0:%d/%s:%d", fwd.host, qemuGvproxyGuestIP, fwd.guest))
+	}
+	forwardStr := strings.Join(fwdParts, ",")
+
+	args := []string{
+		"-pid-file", pidFile,
+		"-gvproxy",
+		"-gp.listen-qemu", fmt.Sprintf("unix://%s", socketPath),
+		"-gp.forwards", forwardStr,
+	}
+
+	tflog.Debug(ctx, "Starting gvproxy for QEMU (self-invoke)", map[string]any{"args": args})
+
+	res, err := cmd.RunDetached(d, os.Args[0], args...)
+	if err != nil {
+		return "", fmt.Errorf("failed to start gvproxy: %w; %s", err, res.Stderr)
+	}
+
+	// Write PID file in case gvproxy hasn't written it yet.
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+		return "", fmt.Errorf("failed to write gvproxy PID file: %w", err)
+	}
+
+	// Poll for the socket file to appear.
+	deadline := time.Now().Add(qemuGvproxyPollTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(socketPath); err == nil {
+			tflog.Debug(ctx, "gvproxy socket ready", map[string]any{"path": socketPath})
+			return socketPath, nil
+		}
+		time.Sleep(qemuGvproxyPollInterval)
+	}
+
+	return "", fmt.Errorf("gvproxy socket %s did not appear within %s", socketPath, qemuGvproxyPollTimeout)
+}
+
+// stopGvproxy sends SIGTERM to the gvproxy process.
+func (h *QEMUHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
+	pidFile := filepath.Join(resourceDir, "gvproxy.pid")
+	pidBytes, err := os.ReadFile(pidFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			tflog.Debug(ctx, "Failed to read gvproxy PID file", map[string]any{"error": err})
+		}
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		tflog.Debug(ctx, "Invalid gvproxy PID", map[string]any{"error": err})
+		return
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		tflog.Debug(ctx, "SIGTERM to gvproxy failed (may already be stopped)", map[string]any{"error": err})
+	}
 }
 
 func (h *QEMUHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPaths, error) {
@@ -142,8 +231,19 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		"-drive", fmt.Sprintf("if=pflash,format=raw,file=%s", paths.OVMFVars),
 	)
 
-	// NIC.
-	qemuArgs = append(qemuArgs, "-nic", conf.Nic0)
+	// NIC: use gvproxy stream transport when enabled, otherwise SLIRP.
+	if conf.UseGvproxy && !conf.IsInstallation && conf.SSHPort != 0 {
+		gvSocketPath, gvErr := h.startGvproxy(ctx, conf)
+		if gvErr != nil {
+			return fmt.Errorf("start gvproxy: %w", gvErr)
+		}
+		qemuArgs = append(qemuArgs,
+			"-netdev", fmt.Sprintf("stream,id=usernet0,addr.type=unix,addr.path=%s", gvSocketPath),
+			"-device", fmt.Sprintf("virtio-net-pci,netdev=usernet0,mac=%s", qemuGvproxyMAC),
+		)
+	} else {
+		qemuArgs = append(qemuArgs, "-nic", conf.Nic0)
+	}
 
 	// Disk drives.
 	if conf.IsInstallation {
@@ -300,6 +400,9 @@ func (h *QEMUHypervisor) Stop(ctx context.Context, resourceDir string) error {
 		// This may happen because QEMU exits before responding.
 		tflog.Debug(ctx, "QMP quit command error (may be benign)", map[string]any{"error": err})
 	}
+
+	// Stop gvproxy if it was running.
+	h.stopGvproxy(ctx, resourceDir)
 
 	return nil
 }

@@ -10,5 +10,4 @@ package hypervisor
 type VFKitHypervisor struct {
 	VfkitPath   string
 	QemuImgPath string
-	GvproxyPath string
 }

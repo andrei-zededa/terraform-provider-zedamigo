@@ -33,6 +33,9 @@ type VMConfig struct {
 	ExtraArgs []string
 	CPUPins   []int64
 
+	// Use embedded gvproxy instead of QEMU SLIRP for networking.
+	UseGvproxy bool
+
 	// For installed_edge_node:
 	InstallerISO string
 	InstallerRaw string

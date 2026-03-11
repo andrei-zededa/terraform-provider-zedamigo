@@ -38,8 +38,8 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   tags = {}
@@ -66,8 +66,8 @@ resource "zedcloud_edgenode" "ENODE_TEST_BBBB" {
     intf_usage = "ADAPTER_USAGE_MANAGEMENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    # ztype      = "IO_TYPE_ETH"
-    tags = {}
+    ztype      = "IO_TYPE_ETH"
+    tags       = {}
   }
 
   tags = {}
@@ -159,6 +159,7 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.disk_image
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.ovmf_vars
+  use_gvproxy        = true
 }
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
@@ -169,4 +170,5 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.disk_image
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.ovmf_vars
+  use_gvproxy        = true
 }

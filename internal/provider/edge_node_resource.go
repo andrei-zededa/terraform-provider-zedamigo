@@ -67,6 +67,7 @@ type EdgeNodeModel struct {
 	SSHPort          types.Int32  `tfsdk:"ssh_port"`
 	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
 	CPUPins          types.List   `tfsdk:"cpu_pins"`
+	UseGvproxy       types.Bool   `tfsdk:"use_gvproxy"`
 }
 
 func (r *EdgeNode) getResourceDir(id string) string {
@@ -229,6 +230,11 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:    true,
 				Required:    false,
 			},
+			"use_gvproxy": schema.BoolAttribute{
+				Description:         "Use embedded gvproxy for networking instead of QEMU SLIRP. Requires QEMU 7.2+. Default: `false` on Linux but `true` on MacOS since there we have to use it since we use `vfkit` instead of `qemu`.",
+				MarkdownDescription: "Use embedded gvproxy for networking instead of QEMU SLIRP. Requires QEMU 7.2+. Default: `false` on Linux but `true` on MacOS since there we have to use it since we use `vfkit` instead of `qemu`.",
+				Optional:            true,
+			},
 			"cpu_pins": schema.ListAttribute{
 				Description: "List of host CPU IDs to pin VM vCPUs to. Must match CPU count.",
 				MarkdownDescription: undent.Md(`
@@ -349,6 +355,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		SwTPMSocket:    data.SwTPMSock.ValueString(),
 		ExtraArgs:      extraArgs,
 		CPUPins:        cpuPins,
+		UseGvproxy:     !data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool(),
 	}
 
 	// Handle serial console config.
