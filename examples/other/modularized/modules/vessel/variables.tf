@@ -13,6 +13,23 @@ variable "vessel_project_name" {
   type        = string
 }
 
+variable "management_network" {
+  description = "Optional per-vessel management network with static IP configuration"
+  type = object({
+    name    = string
+    title   = optional(string, "")
+    kind    = optional(string, "NETWORK_KIND_V4_ONLY")
+    mtu     = optional(number, 0)
+    ip = object({
+      dhcp    = optional(string, "NETWORK_DHCP_TYPE_STATIC")
+      subnet  = string
+      gateway = string
+      dns     = optional(list(string), [])
+    })
+  })
+  default = null
+}
+
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
@@ -22,8 +39,14 @@ variable "nodes" {
     ssh_pub_key        = optional(string, "")
     tags               = optional(map(string), {})
     vlans              = optional(map(list(number)), {})
-    apps               = optional(map(map(string)), {})
-    interface_networks = optional(map(string), {})
+    apps = optional(map(object({
+      cloud_init_vars = optional(map(string), {})
+      drive_images    = optional(map(string), {})
+    })), {})
+    interface_networks = optional(map(object({
+      netname = string
+      ipaddr  = optional(string, "")
+    })), {})
   }))
 }
 
@@ -45,7 +68,12 @@ locals {
         intfname   = io.logicallabel
         intf_usage = io.usage
         cost       = io.cost
-        netname    = contains(keys(node.interface_networks), io.logicallabel) ? data.zedcloud_network.interface_net[node.interface_networks[io.logicallabel]].name : data.zedcloud_network.enterprise.name
+        netname    = contains(keys(node.interface_networks), io.logicallabel) ? (
+          var.management_network != null && node.interface_networks[io.logicallabel].netname == var.management_network.name
+            ? zedcloud_network.management[0].name
+            : data.zedcloud_network.interface_net[node.interface_networks[io.logicallabel].netname].name
+        ) : data.zedcloud_network.enterprise.name
+        ipaddr     = contains(keys(node.interface_networks), io.logicallabel) ? node.interface_networks[io.logicallabel].ipaddr : ""
         ztype      = io.ztype
         tags       = {}
       }

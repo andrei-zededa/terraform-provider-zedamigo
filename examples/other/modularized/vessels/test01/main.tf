@@ -4,6 +4,7 @@ module "vessel" {
   network_name            = var.network_name
   vessel_project_name     = var.vessel_project_name
   nodes                   = var.nodes
+  management_network      = var.management_network
 }
 
 output "edge_nodes" {

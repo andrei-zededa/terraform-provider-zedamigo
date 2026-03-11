@@ -22,7 +22,10 @@ data "zedcloud_network" "enterprise" {
 
 data "zedcloud_network" "interface_net" {
   for_each = toset(flatten([
-    for node in var.nodes : values(node.interface_networks)
+    for node in var.nodes : [
+      for iface in values(node.interface_networks) : iface.netname
+      if var.management_network == null || iface.netname != var.management_network.name
+    ]
   ]))
   name  = each.value
   title = ""

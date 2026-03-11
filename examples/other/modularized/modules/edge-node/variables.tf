@@ -56,6 +56,7 @@ variable "interfaces" {
     intf_usage = string
     cost       = number
     netname    = string
+    ipaddr     = optional(string, "")
     ztype      = string
     tags       = optional(map(string), {})
   }))

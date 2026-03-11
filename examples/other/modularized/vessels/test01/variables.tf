@@ -34,17 +34,47 @@ variable "vessel_project_name" {
   default     = "vessel_test01"
 }
 
+variable "management_network" {
+  description = "Optional per-vessel management network with static IP configuration"
+  type = object({
+    name  = string
+    title = optional(string, "")
+    kind  = optional(string, "NETWORK_KIND_V4_ONLY")
+    mtu   = optional(number, 0)
+    ip = object({
+      dhcp    = optional(string, "NETWORK_DHCP_TYPE_STATIC")
+      subnet  = string
+      gateway = string
+      dns     = optional(list(string), [])
+    })
+  })
+  default = {
+    name = "no_vessel_test01"
+    ip = {
+      subnet  = "192.168.123.0/24"
+      gateway = "192.168.123.254"
+      dns     = ["9.9.9.9"]
+    }
+  }
+}
+
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
-    model_name         = string
-    serialno           = string
-    onboarding_key     = optional(string, "")
-    ssh_pub_key        = optional(string, "")
-    tags               = optional(map(string), {})
-    vlans              = optional(map(list(number)), {})
-    apps               = optional(map(map(string)), {})
-    interface_networks = optional(map(string), {})
+    model_name     = string
+    serialno       = string
+    onboarding_key = optional(string, "")
+    ssh_pub_key    = optional(string, "")
+    tags           = optional(map(string), {})
+    vlans          = optional(map(list(number)), {})
+    apps = optional(map(object({
+      cloud_init_vars = optional(map(string), {})
+      drive_images    = optional(map(string), {})
+    })), {})
+    interface_networks = optional(map(object({
+      netname = string
+      ipaddr  = optional(string, "")
+    })), {})
   }))
 
   default = {
@@ -54,9 +84,21 @@ variable "nodes" {
       ssh_pub_key = "ssh-ed25519 AAAA.... user@example.net"
       apps = {
         "ubuntu_vm" = {
-          "USERNAME"    = "labtest"
-          "SSH_PUB_KEY" = "ssh-ed25519 AAAA.... user@example.net"
+          cloud_init_vars = {
+            "USERNAME"    = "labtest"
+            "SSH_PUB_KEY" = "ssh-ed25519 AAAA.... user@example.net"
+          }
+          drive_images = {
+            # For the 3rd drive of the app instance (indexes start at 0) use
+            # this image name for the content-tree volume-instance. For any
+            # other drives not listed here an empty block-storage volume-instance
+            # will be created.
+            "2" = "ubuntu_24_04_server_cloud"
+          }
         }
+      }
+      interface_networks = {
+        eth1 = { netname = "no_vessel_test01", ipaddr = "192.168.123.66" }
       }
     }
     "EEEE" = {
@@ -67,7 +109,7 @@ variable "nodes" {
         eth1 = [2001, 2002]
       }
       interface_networks = {
-        eth0 = "default_network_dhcp_client"
+        eth0 = { netname = "default_network_dhcp_client" }
       }
     }
   }

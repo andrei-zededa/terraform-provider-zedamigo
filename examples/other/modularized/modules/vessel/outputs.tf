@@ -38,9 +38,20 @@ output "app_instances" {
 }
 
 output "volume_instances" {
-  description = "Map of node_key:app_name composite keys to volume instance details"
+  description = "Map of node_key:app_name:drive_index composite keys to volume instance details"
   value = {
-    for key, vol in zedcloud_volume_instance.persist_vol : key => {
+    for key, vol in zedcloud_volume_instance.app_vol_ctree_or_bstor : key => {
+      id    = vol.id
+      name  = vol.name
+      label = vol.label
+    }
+  }
+}
+
+output "content_tree_blockstorage_instances" {
+  description = "Map of node_key:app_name:drive_index composite keys to companion blockstorage volume instances for content tree drives"
+  value = {
+    for key, vol in zedcloud_volume_instance.app_vol_bstor_for_each_ctree : key => {
       id    = vol.id
       name  = vol.name
       label = vol.label

@@ -125,7 +125,8 @@ resource "zedcloud_application" "ubuntu_vm" {
       imageformat = "QCOW2"
       imageid     = zedcloud_image.ubuntu_24_04.id
       imagename   = zedcloud_image.ubuntu_24_04.name
-      maxsize     = "20971520"
+      # maxsize     = tostring(zedcloud_image.ubuntu_24_04.image_size_bytes)
+      maxsize     = "0"
       mountpath   = "/"
       ignorepurge = false
       preserve    = false
@@ -135,11 +136,26 @@ resource "zedcloud_application" "ubuntu_vm" {
 
     # 2nd disk of the VM.
     images {
-      volumelabel = "persist_vol_${local.app_name}"
+      volumelabel = "persist_vol_2nd_${local.app_name}"
       cleartext   = false
       drvtype     = "HDD"
       imageformat = "QCOW2"
-      mountpath   = "/data" # Actual mount path depends on the guest OS.
+      mountpath   = "/data"                           # Actual mount path depends on the guest OS.
+      maxsize     = tostring(10 * 1024 * 1024 * 1024) # 10GB. Actual max size depends on what the app instance sets when it creates the volume-instance.
+      ignorepurge = true
+      preserve    = true
+      readonly    = false
+      target      = "Disk"
+    }
+
+    # 3rd disk of the VM.
+    images {
+      volumelabel = "persist_vol_3rd_${local.app_name}"
+      cleartext   = false
+      drvtype     = "HDD"
+      imageformat = "QCOW2"
+      mountpath   = "/data"                           # Actual mount path depends on the guest OS.
+      maxsize     = tostring(10 * 1024 * 1024 * 1024) # 10GB. Actual max size depends on what the app instance sets when it creates the volume-instance.
       ignorepurge = true
       preserve    = true
       readonly    = false

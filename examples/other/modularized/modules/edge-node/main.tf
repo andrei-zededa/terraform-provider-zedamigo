@@ -8,6 +8,19 @@ resource "zedcloud_edgenode" "this" {
   project_id     = var.project_id
   admin_state    = "ADMIN_STATE_ACTIVE"
 
+  config_item {
+    key          = "network.download.max.cost"
+    string_value = "255"
+    # Need to set this otherwise we keep getting diff with the info in Zedcloud.
+    uint64_value = "0"
+  }
+
+  config_item {
+    key          = "process.cloud-init.multipart"
+    string_value = "true"
+    # Need to set this otherwise we keep getting diff with the info in Zedcloud.
+    uint64_value = "0"
+  }
 
   dynamic "config_item" {
     for_each = var.ssh_pub_key != "" ? [var.ssh_pub_key] : []
@@ -26,6 +39,7 @@ resource "zedcloud_edgenode" "this" {
       intf_usage = interfaces.value.intf_usage
       cost       = interfaces.value.cost
       netname    = interfaces.value.netname
+      ipaddr     = interfaces.value.ipaddr
       ztype      = interfaces.value.ztype
       tags       = interfaces.value.tags
     }
