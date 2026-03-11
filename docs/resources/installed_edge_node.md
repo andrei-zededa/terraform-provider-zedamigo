@@ -18,12 +18,13 @@ Installed Edge Node
 ### Required
 
 - `disk_image_base` (String) Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)
-- `installer_iso` (String) Installed Edge Node EVE-OS Installer ISO file
 - `serial_no` (String) Installed Edge Node serial number
 
 ### Optional
 
 - `disk_1_image_base` (String) Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)
+- `installer_iso` (String) Installed Edge Node EVE-OS Installer ISO file
+- `installer_raw` (String) Installed Edge Node EVE-OS Installer RAW file (mutually exclusive with installer_iso)
 - `name` (String) Edge Node name
 - `swtpm_socket` (String) swtpm process unix socket
 

@@ -3,19 +3,19 @@
 page_title: "zedamigo_eve_installer Resource - zedamigo"
 subcategory: ""
 description: |-
-  It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+  It creates a custom EVE-OS installer (in ISO or RAW format) by running
   the corresponding lfedge/eve container image according to Get a custom EVE-OS image https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5 .
-  It supports all the customizations that the EVE-OS installer supports. the
-  resulting file can be used as the installer_iso attribute of a zedamigo_installed_edge_node
+  It supports all the customizations that the EVE-OS installer supports. The
+  resulting file can be used as the installer_iso or installer_raw attribute of a zedamigo_installed_edge_node
   resource.
 ---
 
 # zedamigo_eve_installer (Resource)
 
-It creates a custom EVE-OS installer (in the ISO RAW file format) by running
+It creates a custom EVE-OS installer (in ISO or RAW format) by running
 the corresponding lfedge/eve container image according to [Get a custom EVE-OS image](https://help.zededa.com/hc/en-us/articles/26755679942939-Get-a-custom-EVE-OS-image#h_01HE5ZSN6VHTTRH7Z3K1YHEQG5) .
-It supports all the customizations that the EVE-OS installer supports. the
-resulting file can be used as the `installer_iso` attribute of a `zedamigo_installed_edge_node`
+It supports all the customizations that the EVE-OS installer supports. The
+resulting file can be used as the `installer_iso` or `installer_raw` attribute of a `zedamigo_installed_edge_node`
 resource.
 
 
@@ -34,6 +34,7 @@ resource.
 - `additional_hosts` (String) Additional entries that will be appended to /etc/hosts of the installed edge-node
 - `authorized_keys` (String) SSH public key (unsure if multiple are supported) that is configured on the installed edge-node for SSH prior to onboarding
 - `device_port_config_override` (String) DevicePortConfig/override.json
+- `format` (String) Installer image format: `iso` (default) or `raw`
 - `grub_cfg` (String) grub.cfg
 - `object_signing_ca` (String) The CA that signed the internal controller certificate, see `root-certificate.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md
 - `tls_ca` (String) The CA that signed the TLS server certificate (PEM), see `v2tlsbaseroot-certificates.pem` in https://github.com/lf-edge/eve/blob/master/docs/REGISTRATION.md
