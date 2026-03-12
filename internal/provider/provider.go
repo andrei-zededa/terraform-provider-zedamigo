@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -272,6 +273,14 @@ func (p *ZedAmigoProvider) DataSources(ctx context.Context) []func() datasource.
 		NewSystemInfoDataSource,
 		NewEveInstallerDataSource,
 	}
+}
+
+func newResourceID() (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%08x", b), nil
 }
 
 func New(version string) func() provider.Provider {

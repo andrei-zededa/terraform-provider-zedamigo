@@ -9,7 +9,6 @@ require (
 	github.com/coredhcp/coredhcp v0.0.0-20250806070228-f7e98e4e350b
 	github.com/crc-org/vfkit v0.6.3
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
-	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/google/go-tpm-tools v0.4.5
 	github.com/hashicorp/terraform-plugin-framework v1.16.1
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0

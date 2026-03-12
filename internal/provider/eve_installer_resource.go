@@ -10,7 +10,6 @@ import (
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
-	"github.com/gofrs/uuid/v5"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -194,13 +193,13 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	u, err := uuid.NewV4()
+	id, err := newResourceID()
 	if err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
-			fmt.Sprintf("Unable to generate a new UUID: %s", err))
+			fmt.Sprintf("Unable to generate a new resource ID: %s", err))
 		return
 	}
-	data.ID = types.StringValue(u.String())
+	data.ID = types.StringValue(id)
 	if resp.Diagnostics.HasError() {
 		return
 	}
