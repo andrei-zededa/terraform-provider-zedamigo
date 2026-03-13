@@ -30,6 +30,19 @@ data "terracurl_request" "random_password" {
 module "enterprise" {
   source       = "../modules/enterprise"
   app_password = jsondecode(data.terracurl_request.random_password.response).data[0]
+
+  users = {
+    "bis-zedcloud-manager@example.net" = {
+      email      = "bis-zedcloud-manager@example.net"
+      role       = "SysManager"
+      first_name = "Bis"
+      full_name  = "Bis Zedcloud Manager"
+    }
+    "other-zedcloud-operator@example.net" = {
+      email = "other-zedcloud-operator@example.net"
+      role  = "SysOperator"
+    }
+  }
 }
 
 output "project_name" {
@@ -54,4 +67,8 @@ output "datastore_names" {
 
 output "network_name" {
   value = module.enterprise.network_name
+}
+
+output "user_ids" {
+  value = module.enterprise.user_ids
 }

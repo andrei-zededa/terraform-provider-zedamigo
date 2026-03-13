@@ -71,3 +71,8 @@ output "network_id" {
   description = "Default network ID"
   value       = zedcloud_network.default_network_dhcp_client.id
 }
+
+output "user_ids" {
+  description = "Map of username to user ID"
+  value       = { for k, u in zedcloud_user.this : k => u.id }
+}

@@ -23,3 +23,14 @@ variable "app_password" {
   sensitive   = true
   default     = ""
 }
+
+variable "users" {
+  description = "Map of username to user attributes. The role is specified by name and looked up automatically."
+  type = map(object({
+    email      = string
+    role       = string
+    first_name = optional(string)
+    full_name  = optional(string)
+  }))
+  default = {}
+}
