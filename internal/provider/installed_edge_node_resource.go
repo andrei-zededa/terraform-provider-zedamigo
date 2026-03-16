@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -53,6 +54,7 @@ type InstalledNodeModel struct {
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
 	Success          types.Bool   `tfsdk:"success"`
+	SoftSerial       types.String `tfsdk:"soft_serial"`
 }
 
 func (r *InstalledNode) getResourceDir(id string) string {
@@ -143,6 +145,11 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"success": schema.BoolAttribute{
 				Description:         "Whether the EVE-OS install finished succesfully",
 				MarkdownDescription: "Whether the EVE-OS install finished succesfully",
+				Computed:            true,
+			},
+			"soft_serial": schema.StringAttribute{
+				Description:         "EVE-OS soft serial number extracted from install log",
+				MarkdownDescription: "EVE-OS soft serial number extracted from install log",
 				Computed:            true,
 			},
 		},
@@ -264,28 +271,35 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	data.DiskImg = types.StringValue(paths.DiskImage)
 	data.Disk1Img = types.StringValue(paths.Disk1Image)
 
-	success, err := readInstalledNode(r.providerConf, d)
+	success, softSerial, err := readInstalledNode(r.providerConf, d)
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
 			fmt.Sprintf("Can't read EVE-OS install log: %v", err))
 	}
 	data.Success = types.BoolValue(success)
+	data.SoftSerial = types.StringValue(softSerial)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func readInstalledNode(_ *ZedAmigoProviderConfig, path string) (bool, error) {
-	return true, nil
-
-	/*
-		x, err := os.ReadFile(filepath.Join(path, "serial_console_install.log"))
-		if err != nil {
-			return false, fmt.Errorf("%w", err)
+func readInstalledNode(_ *ZedAmigoProviderConfig, path string) (bool, string, error) {
+	x, err := os.ReadFile(filepath.Join(path, "serial_console_install.log"))
+	if err != nil {
+		return false, "", fmt.Errorf("%w", err)
+	}
+	success := bytes.Contains(x, []byte("EVE-OS installation completed"))
+	var softSerial string
+	for _, line := range bytes.Split(x, []byte("\n")) {
+		if bytes.Contains(line, []byte("SOFT_SERIAL = ")) {
+			parts := bytes.SplitN(line, []byte("SOFT_SERIAL = "), 2)
+			if len(parts) == 2 {
+				softSerial = string(bytes.TrimSpace(parts[1]))
+			}
+			break
 		}
-
-		return bytes.Contains(x, []byte("EVE-OS installation completed")), nil
-	*/
+	}
+	return success, softSerial, nil
 }
 
 func (r *InstalledNode) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -297,13 +311,14 @@ func (r *InstalledNode) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
-	x, err := readInstalledNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
+	success, softSerial, err := readInstalledNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
 			fmt.Sprintf("Can't read EVE-OS install log: %v", err))
 		return
 	}
-	data.Success = types.BoolValue(x)
+	data.Success = types.BoolValue(success)
+	data.SoftSerial = types.StringValue(softSerial)
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

@@ -18,9 +18,17 @@ resource "zedcloud_network" "edge_node_as_dhcp_client" {
 }
 
 resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
-  name           = "ENODE_TEST_AAAA_${var.config_suffix}"
-  title          = "ENODE_TEST AAAA"
-  serialno       = "SN_TEST_AAAA_${var.config_suffix}"
+  name  = "ENODE_TEST_AAAA_${var.config_suffix}"
+  title = "ENODE_TEST AAAA"
+  # Usually we would prefer to set a unique serial number like this and then
+  # use it for the corresponding zedamigo_installed_edge_node and zedcloud_edgenode
+  # resources as QEMU will set if through SMBIOS and then it will be detected by
+  # EVE-OS as a "hardware serial number" (dmidecode system-serial-number). However
+  # on macOS due to limitations of the Apple Virtualization Framework we cannot
+  # set it, therefore we need to flip the logic. We let the EVE-OS install run
+  # and generate a "soft serial" and use it here.
+  # serialno       = "SN_TEST_AAAA_${var.config_suffix}"
+  serialno       = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.soft_serial
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -46,9 +54,11 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
 }
 
 resource "zedcloud_edgenode" "ENODE_TEST_BBBB" {
-  name           = "ENODE_TEST_BBBB_${var.config_suffix}"
-  title          = "ENODE_TEST BBBB"
-  serialno       = "SN_TEST_BBBB_${var.config_suffix}"
+  name  = "ENODE_TEST_BBBB_${var.config_suffix}"
+  title = "ENODE_TEST BBBB"
+  # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
+  # serialno       = "SN_TEST_BBBB_${var.config_suffix}"
+  serialno       = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.soft_serial
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -111,15 +121,19 @@ resource "zedamigo_eve_installer" "eve_os_installer_1600" {
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
 #### created and run the install process.
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
-  name            = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
-  serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
+  name = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
+  # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
+  # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
+  serial_no       = "1234567890"
   installer_raw   = zedamigo_eve_installer.eve_os_installer_1453.filename
   disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
-  name            = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
-  serial_no       = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
+  name = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
+  # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
+  # serial_no       = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
+  serial_no       = "1234567890"
   installer_raw   = zedamigo_eve_installer.eve_os_installer_1600.filename
   disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
@@ -152,9 +166,10 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
 #### `ssh_port` is the value. Also `serial_console_log` is all the output
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
-  name               = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus               = 4
-  mem                = "4G"
+  name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
+  cpus = 4
+  mem  = "4G"
+  # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.disk_image
@@ -163,9 +178,10 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
 }
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM_BBBB" {
-  name               = "ENODE_TEST_VM_BBBB_${var.config_suffix}"
-  cpus               = 4
-  mem                = "4G"
+  name = "ENODE_TEST_VM_BBBB_${var.config_suffix}"
+  cpus = 4
+  mem  = "4G"
+  # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.serial_no
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_BBBB.disk_image
