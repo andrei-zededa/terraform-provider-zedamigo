@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/socket"
 	vfconfig "github.com/crc-org/vfkit/pkg/config"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -312,17 +314,9 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	}
 	devices = append(devices, rngDev)
 
-	// Serial console.
-	var serialDev vfconfig.VirtioDevice
-	serialLogPath := conf.SerialToFile
-	if serialLogPath == "" {
-		serialLogPath = paths.SerialConsoleLog
-	}
-	if serialLogPath != "" {
-		serialDev, err = vfconfig.VirtioSerialNew(serialLogPath)
-	} else {
-		serialDev, err = vfconfig.VirtioSerialNewPty()
-	}
+	// Serial console: always use PTY mode. A PTY tailer (launched separately
+	// or in-process for installations) reads the PTY and writes to the log file.
+	serialDev, err := vfconfig.VirtioSerialNewPty()
 	if err != nil {
 		return fmt.Errorf("configure serial: %w", err)
 	}
@@ -352,9 +346,35 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 
 	// Launch vfkit.
 	if conf.IsInstallation {
-		res, err := cmd.Run(d, h.VfkitPath, args...)
+		resultChan := cmd.RunBG(d, h.VfkitPath, args...)
+
+		// Poll for PTY path in the vfkit stderr log.
+		ptyDevPath, err := waitForPtyPath(d)
 		if err != nil {
-			return fmt.Errorf("failed to run vfkit VM for installing EVE-OS: %w; %s", err, res.Stderr)
+			tflog.Warn(ctx, "Could not determine serial PTY path for installation", map[string]any{"error": err})
+		}
+
+		// Start in-process tailer goroutine if we have both a PTY and an output path.
+		tailerCtx, tailerCancel := context.WithCancel(ctx)
+		tailerDone := make(chan struct{})
+		if err == nil && conf.SerialToFile != "" {
+			go func() {
+				defer close(tailerDone)
+				if tErr := runPtyToFile(tailerCtx, ptyDevPath, conf.SerialToFile); tErr != nil {
+					tflog.Warn(ctx, "PTY tailer error during installation", map[string]any{"error": tErr})
+				}
+			}()
+		} else {
+			close(tailerDone)
+		}
+
+		// Wait for vfkit to complete.
+		result := <-resultChan
+		tailerCancel()
+		<-tailerDone
+
+		if result.Error != nil {
+			return fmt.Errorf("failed to run vfkit VM for installing EVE-OS: %w; %s", result.Error, result.Stderr)
 		}
 	} else {
 		res, err := cmd.RunDetached(d, h.VfkitPath, args...)
@@ -365,17 +385,15 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 		if err := os.WriteFile(paths.PIDFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 			return fmt.Errorf("failed to write vfkit PID file: %w", err)
 		}
-		if serialLogPath == "" {
-			// PTY mode: extract the PTY path from vfkit's stderr log so the user can connect.
-			if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
-				ptyFile := filepath.Join(d, "serial.pty")
-				if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
-					tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
-				}
-				tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
-			} else {
-				tflog.Warn(ctx, "Could not determine serial PTY path from vfkit output", map[string]any{"error": err, "stderr_log": res.Logs.Stderr})
+		// PTY mode: extract the PTY path from vfkit's stderr log so the tailer can connect.
+		if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
+			ptyFile := filepath.Join(d, "serial.pty")
+			if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
+				tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
 			}
+			tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
+		} else {
+			tflog.Warn(ctx, "Could not determine serial PTY path from vfkit output", map[string]any{"error": err, "stderr_log": res.Logs.Stderr})
 		}
 	}
 
@@ -470,6 +488,45 @@ func parsePtyPath(logFile string) (string, error) {
 		return strings.TrimSpace(rest), nil
 	}
 	return "", fmt.Errorf("PTY path not found in log file %s", logFile)
+}
+
+// waitForPtyPath polls for a vfkit stderr log file in the resource directory
+// and extracts the PTY device path from it.
+func waitForPtyPath(resourceDir string) (string, error) {
+	const (
+		pollInterval = 200 * time.Millisecond
+		pollTimeout  = 10 * time.Second
+	)
+
+	deadline := time.Now().Add(pollTimeout)
+	for time.Now().Before(deadline) {
+		matches, _ := filepath.Glob(filepath.Join(resourceDir, "*_vfkit_stderr.log"))
+		for _, logFile := range matches {
+			if ptyPath, err := parsePtyPath(logFile); err == nil {
+				return ptyPath, nil
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return "", fmt.Errorf("PTY path not found in vfkit stderr logs within %s", pollTimeout)
+}
+
+// runPtyToFile opens a PTY device and writes timestamped lines to an output file.
+func runPtyToFile(ctx context.Context, ptyDevPath, outPath string) error {
+	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file %s: %w", outPath, err)
+	}
+	defer outFile.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	tailer := socket.NewTailer(outFile, logger)
+	defer tailer.Close()
+
+	return tailer.RunPty(ctx, ptyDevPath)
 }
 
 // parseMemoryToMiB converts memory strings like "4G", "4096M", "4096" to MiB.

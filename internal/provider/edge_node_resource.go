@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
@@ -378,7 +379,10 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 
 	// Handle serial console config.
-	if data.SerialPortServer.ValueBool() {
+	if runtime.GOOS == "darwin" {
+		// On macOS (vfkit), always PTY mode. SerialToFile is the tailer output destination.
+		vmConf.SerialToFile = filepath.Join(d, "serial_console_run.log")
+	} else if data.SerialPortServer.ValueBool() {
 		vmConf.SerialToSocket = filepath.Join(d, "serial_port.socket")
 	} else {
 		vmConf.SerialToFile = filepath.Join(d, "serial_console_run.log")
@@ -418,9 +422,27 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 
 	tflog.Trace(ctx, "Edge Node Resource created succesfully")
 
-	// Launch socket tailer if serial_port_server is true.
-	// On MacOS (vfkit), serial output goes directly to a file — no socket tailer needed.
-	if data.SerialPortServer.ValueBool() && runtime.GOOS != "darwin" {
+	// Launch tailer for serial console output.
+	if runtime.GOOS == "darwin" {
+		// On macOS (vfkit), read PTY path written by vfkit.Start() and launch PTY tailer.
+		ptyPathBytes, err := os.ReadFile(filepath.Join(d, "serial.pty"))
+		if err != nil {
+			resp.Diagnostics.AddError("Edge Node Resource Error",
+				fmt.Sprintf("Failed to read serial PTY path: %v", err))
+			return
+		}
+		ptyDevPath := strings.TrimSpace(string(ptyPathBytes))
+		res, err := cmd.RunDetached(d, os.Args[0], []string{
+			"-socket-tailer", "-st.pty", ptyDevPath,
+			"-st.out", data.SerialConsoleLog.ValueString(),
+		}...)
+		if err != nil {
+			resp.Diagnostics.AddError("Edge Node Resource Error",
+				"Failed to run PTY tailer")
+			resp.Diagnostics.Append(res.Diagnostics()...)
+			return
+		}
+	} else if data.SerialPortServer.ValueBool() {
 		res, err := cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
 		if err != nil {
 			resp.Diagnostics.AddError("Edge Node Resource Error",

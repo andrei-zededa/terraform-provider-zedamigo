@@ -44,6 +44,7 @@ var (
 	// Socket tailer mode CLI flags.
 	listenPath  = flag.String("st.listen", "", "Socket tailer: listen on UNIX socket at given path")
 	connectPath = flag.String("st.connect", "", "Socket tailer: connect to existing UNIX socket at given path")
+	ptyPath     = flag.String("st.pty", "", "Socket tailer: read from PTY device at given path")
 	outputFile  = flag.String("st.out", "", "Socket tailer: output file (default: stdout)")
 
 	dhcpServer = flag.Bool("dhcp-server", false, "Run the binary in 'DHCP server' mode")
@@ -94,15 +95,19 @@ func main() {
 	if *socketTailer {
 		// Run in "socket tailer" mode and NOT the normal terraform provider mode.
 
-		// Validate CLI flags.
-		if *listenPath == "" && *connectPath == "" {
-			fmt.Fprintf(os.Stderr, "Error: In 'socket tailer' mode MUST specify either `-st.listen` or `-st.connect`.\n")
-			flag.Usage()
-			os.Exit(1)
+		// Validate CLI flags: require exactly one of -st.listen, -st.connect, or -st.pty.
+		modeCount := 0
+		if *listenPath != "" {
+			modeCount++
 		}
-
-		if *listenPath != "" && *connectPath != "" {
-			fmt.Fprintf(os.Stderr, "Error: In 'socket tailer' mode CANNOT specify both `-st.listen` and `-st.connect` at the same time.\n")
+		if *connectPath != "" {
+			modeCount++
+		}
+		if *ptyPath != "" {
+			modeCount++
+		}
+		if modeCount != 1 {
+			fmt.Fprintf(os.Stderr, "Error: In 'socket tailer' mode MUST specify exactly one of `-st.listen`, `-st.connect`, or `-st.pty`.\n")
 			flag.Usage()
 			os.Exit(1)
 		}
@@ -189,14 +194,17 @@ func socketTailerMain() {
 	}))
 	slog.SetDefault(logger)
 
-	// Determine mode and socket path.
-	var mode, socketPath string
+	// Determine mode and path.
+	var mode, targetPath string
 	if *listenPath != "" {
 		mode = "listen"
-		socketPath = *listenPath
-	} else {
+		targetPath = *listenPath
+	} else if *connectPath != "" {
 		mode = "connect"
-		socketPath = *connectPath
+		targetPath = *connectPath
+	} else {
+		mode = "pty"
+		targetPath = *ptyPath
 	}
 
 	var w io.Writer = os.Stdout
@@ -232,10 +240,13 @@ func socketTailerMain() {
 
 	// Run and handle cleanup
 	var err error
-	if mode == "listen" {
-		err = tailer.RunServer(ctx, socketPath)
-	} else {
-		err = tailer.RunClient(ctx, socketPath)
+	switch mode {
+	case "listen":
+		err = tailer.RunServer(ctx, targetPath)
+	case "connect":
+		err = tailer.RunClient(ctx, targetPath)
+	case "pty":
+		err = tailer.RunPty(ctx, targetPath)
 	}
 
 	// Cleanup

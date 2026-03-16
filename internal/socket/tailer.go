@@ -219,6 +219,49 @@ func handleConnection(conn net.Conn, t *Tailer) {
 	t.logInfo("Connection closed", "addr", clientAddr)
 }
 
+// RunPty reads lines from a PTY device at ptyPath and writes them with timestamps.
+// It blocks until the context is cancelled or the PTY is closed.
+func (t *Tailer) RunPty(ctx context.Context, ptyPath string) error {
+	f, err := os.Open(ptyPath)
+	if err != nil {
+		return fmt.Errorf("failed to open PTY %s: %w", ptyPath, err)
+	}
+
+	// Close the file when the context is cancelled to unblock the scanner.
+	go func() {
+		<-ctx.Done()
+		t.logInfo("PTY tailer shutting down")
+		f.Close()
+	}()
+
+	t.logInfo("Reading from PTY", "path", ptyPath)
+
+	scanner := bufio.NewScanner(f)
+	scanner.Split(bufio.ScanLines)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if err := t.WriteLine(line); err != nil {
+			t.logError("Failed to write line", "error", err)
+			continue
+		}
+
+		t.logDebug("Logged line", "line", line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		// Ignore "file already closed" errors from context cancellation.
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("error reading from PTY: %w", err)
+	}
+
+	t.logInfo("PTY closed")
+	return nil
+}
+
 // RunClient will try to connect to an existing socket and read lines from that
 // socket and write them to the it's writer.
 func (t *Tailer) RunClient(ctx context.Context, socketPath string) error {
