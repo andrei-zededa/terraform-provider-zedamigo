@@ -30,10 +30,9 @@ fi
 
 # --- path_prepend ---
 # Prepends $1 to PATH if it's a directory and not already in PATH.
-# Persists the new PATH value in .bashrc/.profile.
+# Persists the new PATH value in .bashrc/.profile or .zshrc/.zprofile .
 path_prepend() {
 	local p="${1:-}"
-	local system="${2:-}"
 
 	[ -n "$p" ] || return 0
 	[ -d "$p" ] || return 0
@@ -51,6 +50,16 @@ path_prepend() {
 	rc=""
 	[ -f "$HOME/.profile" ] && rc="$HOME/.profile"
 	[ -f "$HOME/.bash_profile" ] && rc="$HOME/.bash_profile"
+	# On macOS (and other systems) where zsh is the default shell,
+	# persist PATH in .zshrc or .zprofile instead.
+	case "${SHELL:-}" in
+		*/zsh)
+			[ -f "$HOME/.zprofile" ] && rc="$HOME/.zprofile"
+			[ -f "$HOME/.zshrc" ] && rc="$HOME/.zshrc"
+			# If no zsh config exists yet, create .zprofile
+			[ -z "$rc" ] && rc="$HOME/.zprofile"
+			;;
+	esac
 	[ -n "$rc" ] && {
 		printf '\n# Added by zedamigo install script on %s.\n' "$(date)"
 		printf 'case ":$PATH:" in\n'
@@ -165,7 +174,12 @@ EOF
 
 INITIAL_DIR="$PWD"
 cd "$TEMP_DIR"
-$_tf init
+if $_tf init; then
+	info "Provider verification succeeded."
+else
+	warn "Provider verification with '$_tf init' exited with status $?."
+	warn "The provider was installed; you may need to run 'tofu init' or 'terraform init' manually."
+fi
 cd "$INITIAL_DIR"
 
 # --- Runtime dependency advisory ---
