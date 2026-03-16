@@ -29,15 +29,6 @@ locals {
 resource "zedcloud_application_instance" "vm_instance" {
   for_each = local.node_app_pairs
 
-  # Because the app-instances will match network-instances and volume-instances
-  # based on tags we need to specifically set this dependency.
-  depends_on = [
-    zedcloud_network_instance.local_nat,
-    zedcloud_network_instance.app_shared,
-    zedcloud_volume_instance.app_vol_ctree_or_bstor,
-    zedcloud_volume_instance.app_vol_bstor_for_each_ctree
-  ]
-
   name      = "${each.value.app_name}_on_${module.edge_node[each.value.node_key].name}"
   title     = "Instance of ${data.zedcloud_application.enterprise[each.value.app_name].name} on ${module.edge_node[each.value.node_key].name}"
   device_id = module.edge_node[each.value.node_key].id
@@ -114,17 +105,29 @@ resource "zedcloud_application_instance" "vm_instance" {
     content {
       cleartext = false
       mountpath = drives.value.mountpath
-      imagename = drives.value.volumelabel
-      maxsize   = drives.value.maxsize
-      preserve  = true
-      readonly  = false
-      drvtype   = drives.value.drvtype
-      target    = drives.value.target
+      # imagename = drives.value.volumelabel
+      # This should create the same config while having the app-instance to volume-instance dependency specific
+      # (instead of depending on ALL volume-instances since we also remove:
+      #     zedcloud_volume_instance.app_vol_ctree_or_bstor,
+      #     zedcloud_volume_instance.app_vol_bstor_for_each_ctree
+      # from `depends_on`).
+      imagename = try(
+        zedcloud_volume_instance.app_vol_bstor_for_each_ctree["${each.value.node_key}:${each.value.app_name}:${drives.key}"].label,
+        zedcloud_volume_instance.app_vol_ctree_or_bstor["${each.value.node_key}:${each.value.app_name}:${drives.key}"].label
+      )
+
+      maxsize  = drives.value.maxsize
+      preserve = true
+      readonly = false
+      drvtype  = drives.value.drvtype
+      target   = drives.value.target
     }
   }
 
-  # This mostly handles app definitions with 2 or more interfaces. The 2nd and any
-  # subsequent interface will be connected with the network-instance with tag "app_traffic",
+  # This mostly handles app definitions with 2 or more interfaces. The first interface defined
+  # in the app definition will be connected to the "app traffic" network-instance on the node,
+  # while the 2nd and any subsequent interfaces (if they exist) will be connected with the
+  # network-instance with tag "local_nat".
   dynamic "interfaces" {
     for_each = data.zedcloud_application.enterprise[each.value.app_name].manifest[0].interfaces
     content {
@@ -132,7 +135,10 @@ resource "zedcloud_application_instance" "vm_instance" {
       intforder   = interfaces.key + 1
       privateip   = false
       netinstname = ""
-      netinsttag  = interfaces.key == 0 ? { ni_local_nat = "true" } : { app_traffic = "app1" }
+      # netinsttag  = interfaces.key == 0 ? { ni_local_nat = "true" } : { app_traffic = "app1" }
+      # This should create exactly the same config as before will also creating a specific dependency
+      # to one network-instance instead of all (since we completly removed the `depends_on` block).
+      netinsttag = interfaces.key == 0 ? zedcloud_network_instance.app_shared[each.value.node_key].tags : zedcloud_network_instance.local_nat[each.value.node_key].tags
     }
   }
 
