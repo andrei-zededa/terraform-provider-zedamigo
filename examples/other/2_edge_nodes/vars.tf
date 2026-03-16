@@ -18,7 +18,7 @@ variable "edge_node_ssh_pub_key" {
 # ensure that.
 variable "config_suffix" {
   type    = string
-  default = "tn17"
+  default = "jt9"
 }
 
 # Defined as a variable in the Github repo.

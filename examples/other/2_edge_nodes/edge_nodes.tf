@@ -75,9 +75,9 @@ resource "zedcloud_edgenode" "ENODE_TEST_BBBB" {
 
 #### This creates a QCOW2 disk image file which will be used for running the
 #### QEMU VM with EVE-OS.
-resource "zedamigo_disk_image" "empty_disk_100G" {
-  name    = "empty_disk_100G"
-  size_mb = 100000 # ~100GB
+resource "zedamigo_disk_image" "empty_disk" {
+  name    = "empty_disk"
+  size_mb = 20000 # ~20GB
 }
 
 #### This creates a custom EVE-OS installer ISO, it basically runs
@@ -114,14 +114,14 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
   name            = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
   serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
   installer_raw   = zedamigo_eve_installer.eve_os_installer_1453.filename
-  disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
+  disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_BBBB" {
   name            = "ENODE_TEST_INSTALL_BBBB_${var.config_suffix}"
   serial_no       = zedcloud_edgenode.ENODE_TEST_BBBB.serialno
   installer_raw   = zedamigo_eve_installer.eve_os_installer_1600.filename
-  disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
+  disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 
 #### This starts a QEMU VM with the disk onto which EVE-OS was installed basically

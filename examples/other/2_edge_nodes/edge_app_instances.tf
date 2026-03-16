@@ -64,6 +64,33 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_C" {
   }
 }
 
+locals {
+  # This is a very convoluted way of taking the same list of Zedcloud custom config
+  # variables that were used when creating the edge-app definition and updating some
+  # of those variables with specific values for a specific edge-app-instance. This
+  # kind of simulates what an user would do in the Zedcontrol WEB UI when creating
+  # an edge-app-instance and setting some of the custom config variables.
+  UBUNTU_CLOUD_INIT_OVERRIDES = {
+    "USERNAME" = {
+      value = "labuser"
+    },
+    "SSH_PUB_KEY" = {
+      value = var.edge_node_ssh_pub_key
+    },
+  }
+
+  # Create a deep copy of the entire list of custom config variables with the
+  # overrides applied.
+  APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS = [
+    for xxx in var.UBUNTU_CLOUD_INIT_VARS : merge(xxx,
+      # Only try to merge if there's an override for this variable.
+      contains(keys(local.UBUNTU_CLOUD_INIT_OVERRIDES), xxx.name)
+      ? local.UBUNTU_CLOUD_INIT_OVERRIDES[xxx.name]
+      : {}
+    )
+  ]
+}
+
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   for_each = local.nodes
 
@@ -79,10 +106,36 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     access = true
   }
 
+  # The `custom_config` section is identical to what is in the edge-app definition,
+  # only that for generating the list of variables we use the per-instance list
+  # of variables (`local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS`) instead of the
+  # list which was used in the edge-app definition (`var.UBUNTU_CLOUD_INIT_VARS`).
   custom_config {
     add                  = true
     allow_storage_resize = false
+    field_delimiter      = "####"
+    name                 = "config01"
     override             = false
+    template             = filebase64("${path.module}/ubuntu_cloud_init.txt")
+
+    variable_groups {
+      name     = "Default Group 1"
+      required = true
+
+      dynamic "variables" {
+        for_each = local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS
+        content {
+          name       = variables.value.name
+          default    = variables.value.default
+          required   = variables.value.required
+          label      = variables.value.label
+          format     = variables.value.format
+          encode     = variables.value.encode
+          max_length = variables.value.max_length
+          value      = variables.value.value
+        }
+      }
+    }
   }
 
   manifest_info {
@@ -92,7 +145,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   vminfo {
     cpus = 1
     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
-    vnc  = false
+    vnc  = true
   }
 
   drives {
