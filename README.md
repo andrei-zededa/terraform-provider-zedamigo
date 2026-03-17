@@ -98,7 +98,9 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso_1451" {
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
-   set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   # Use hvc0 for virtio-serial (default, works on both Linux and macOS).
+   # Use ttyS0 instead if serial_type = "serial" (Linux only).
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
    EOF
 }
 ```
@@ -211,6 +213,50 @@ Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-ins
 
 - Networking resources (`bridge`, `tap`, `vlan`, `dhcp_server`, `dhcp6_server`, `radv`) are **not supported** on macOS.
 - Nested virtualization (EVE-OS running VMs inside the VM) requires **Apple M3 or later**.
+- **Edge node onboarding must use the soft serial on macOS.** On Linux (QEMU), the
+  VM serial number can be set via SMBIOS (`-smbios type=1,serial=...`) and EVE-OS
+  reads it through `dmidecode` as the hardware serial number. This allows setting
+  the serial number upfront in the `zedcloud_edgenode` resource and passing it to
+  the `zedamigo_installed_edge_node` resource. On macOS, the Apple Virtualization
+  Framework (used by vfkit) does not support setting a custom SMBIOS serial number,
+  so EVE-OS cannot obtain a hardware serial. Instead, EVE-OS generates a **soft
+  serial** (a UUID derived from the device certificate) on first boot. The workflow
+  is therefore reversed: let the EVE-OS install run first via
+  `zedamigo_installed_edge_node`, read back its `soft_serial` output attribute, and
+  use that value as the `serialno` of the `zedcloud_edgenode` resource. See
+  [examples/other/2_edge_nodes/edge_nodes.tf](examples/other/2_edge_nodes/edge_nodes.tf)
+  for a working example of this pattern.
+
+## Serial console
+
+Both `zedamigo_installed_edge_node` and `zedamigo_edge_node` support a `serial_type`
+attribute that controls how the serial device is presented to the VM:
+
+| `serial_type` | Device | Guest console | macOS support |
+|---|---|---|---|
+| `"virtio"` (default) | `virtio-serial-pci` | `hvc0` | Yes |
+| `"serial"` | Emulated ISA serial | `ttyS0` | No |
+
+On **macOS (vfkit)** only `"virtio"` is supported. The EVE-OS installer's `grub_cfg`
+must match — use `console=hvc0` for virtio or `console=ttyS0` for ISA serial:
+
+```hcl
+resource "zedamigo_eve_installer" "eve_os_installer" {
+  # ...
+  grub_cfg = <<-EOF
+   set_getty
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
+   EOF
+}
+```
+
+The `zedamigo_edge_node` resource also has a `serial_port_server` attribute. When
+set to `true` on **Linux**, the serial port is exposed as a UNIX socket server
+(path available in the `serial_port_socket` read-only attribute) and a socket tailer
+process logs the output to a file. When `false`, serial output is written directly
+to a log file. On **macOS** this setting is ignored — vfkit does not support
+socket-based serial devices, so output is always written directly to the log file.
+In both cases the `serial_console_log` read-only attribute points to the log file.
 
 ### Install the zedamigo terraform provider locally
 
@@ -229,7 +275,7 @@ or `~/.terraformrc`) then this might fail.
 The install script should finish with a message like `OpenTofu has been successfully initialized!`.
 
 ```shell
-curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.8.0/install.sh | bash -s
+curl -fsSL https://github.com/andrei-zededa/terraform-provider-zedamigo/releases/download/v0.9.0/install.sh | bash -s
 ```
 
 ```shell
