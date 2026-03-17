@@ -26,6 +26,14 @@ Installed Edge Node
 - `installer_iso` (String) Installed Edge Node EVE-OS Installer ISO file
 - `installer_raw` (String) Installed Edge Node EVE-OS Installer RAW file (mutually exclusive with installer_iso)
 - `name` (String) Edge Node name
+- `serial_type` (String) Type of serial device for the installation VM.
+
+Valid values: `"virtio"` (default) and `"serial"`.
+
+- `virtio`: Uses `virtio-serial-pci`. The Linux guest (EVE-OS) must use `console=hvc0`.
+- `serial`: Uses emulated ISA serial. The Linux guest must use `console=ttyS0`.
+
+**macOS (vfkit):** Only `"virtio"` is supported.
 - `swtpm_socket` (String) swtpm process unix socket
 
 ### Read-Only
@@ -35,4 +43,5 @@ Installed Edge Node
 - `id` (String) Installed Edge Node identifier
 - `ovmf_vars` (String) UEFI OVMF vars file specific for this installed edge node
 - `serial_console_log` (String) Edge Node log file of serial console output
+- `soft_serial` (String) EVE-OS soft serial number extracted from install log
 - `success` (Boolean) Whether the EVE-OS install finished succesfully

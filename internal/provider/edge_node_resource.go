@@ -14,11 +14,14 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -61,6 +64,7 @@ type EdgeNodeModel struct {
 	DiskImg          types.String `tfsdk:"disk_image"`
 	Disk1Img         types.String `tfsdk:"disk_1_image"`
 	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
+	SerialType       types.String `tfsdk:"serial_type"`
 	OvmfVarsSrc      types.String `tfsdk:"ovmf_vars_src"`
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
 	QmpSocket        types.String `tfsdk:"qmp_socket"`
@@ -168,6 +172,26 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 					"**macOS (vfkit):** Always populated — serial output is written directly to this file regardless of the " +
 					"`serial_port_server` setting.",
 				Computed: true,
+			},
+			"serial_type": schema.StringAttribute{
+				Description: `Type of serial device for the edge node VM. Valid values: "virtio" (default) and "serial". ` +
+					`"virtio" uses a virtio-serial device; the Linux guest (EVE-OS) must use console=hvc0. ` +
+					`"serial" uses an emulated ISA serial port; the Linux guest must use console=ttyS0. ` +
+					`On macOS (vfkit), only "virtio" is supported.`,
+				MarkdownDescription: "Type of serial device for the edge node VM.\n\n" +
+					"Valid values: `\"virtio\"` (default) and `\"serial\"`.\n\n" +
+					"- `virtio`: Uses `virtio-serial-pci`. The Linux guest (EVE-OS) must use `console=hvc0`.\n" +
+					"- `serial`: Uses emulated ISA serial. The Linux guest must use `console=ttyS0`.\n\n" +
+					"**macOS (vfkit):** Only `\"virtio\"` is supported.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("virtio"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("virtio", "serial"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"disk_image_base": schema.StringAttribute{
 				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
@@ -357,6 +381,12 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		}
 	}
 
+	if runtime.GOOS == "darwin" && data.SerialType.ValueString() == "serial" {
+		resp.Diagnostics.AddError("Invalid serial_type for macOS",
+			`On macOS (vfkit), only serial_type = "virtio" is supported.`)
+		return
+	}
+
 	vmConf := hypervisor.VMConfig{
 		Name:           data.Name.ValueString(),
 		ID:             data.ID.ValueString(),
@@ -376,6 +406,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		ExtraArgs:      extraArgs,
 		CPUPins:        cpuPins,
 		UseGvproxy:     !data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool(),
+		SerialType:     data.SerialType.ValueString(),
 	}
 
 	// Handle serial console config.

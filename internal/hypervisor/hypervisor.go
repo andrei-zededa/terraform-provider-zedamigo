@@ -29,6 +29,7 @@ type VMConfig struct {
 
 	SerialToFile   string // file path for serial output
 	SerialToSocket string // socket path for serial server
+	SerialType     string // "virtio" (default) or "serial" (emulated ISA)
 
 	ExtraArgs []string
 	CPUPins   []int64

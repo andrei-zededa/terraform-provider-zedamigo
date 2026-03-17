@@ -56,6 +56,14 @@ edge-app-instance from the host 2 levels of port forwards are involved.
 **Linux (QEMU):** When `true`, the serial port is exposed as a UNIX socket server and a socket tailer process is launched to also log serial output to a file. When `false`, serial output is written directly to a log file.
 
 **macOS (vfkit):** This setting is ignored — serial output is always written directly to a log file because vfkit does not support socket-based serial devices. The `serial_console_log` attribute will always be populated.
+- `serial_type` (String) Type of serial device for the edge node VM.
+
+Valid values: `"virtio"` (default) and `"serial"`.
+
+- `virtio`: Uses `virtio-serial-pci`. The Linux guest (EVE-OS) must use `console=hvc0`.
+- `serial`: Uses emulated ISA serial. The Linux guest must use `console=ttyS0`.
+
+**macOS (vfkit):** Only `"virtio"` is supported.
 - `swtpm_socket` (String) swtpm process unix socket
 - `use_gvproxy` (Boolean) Use embedded gvproxy for networking instead of QEMU SLIRP. Requires QEMU 7.2+. Default: `false` on Linux but `true` on MacOS since there we have to use it since we use `vfkit` instead of `qemu`.
 

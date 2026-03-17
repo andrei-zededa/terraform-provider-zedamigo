@@ -219,10 +219,28 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 	)
 
 	// Serial console.
-	if conf.SerialToSocket != "" {
-		qemuArgs = append(qemuArgs, "-serial", fmt.Sprintf("unix:%s,server,wait", conf.SerialToSocket))
-	} else if conf.SerialToFile != "" {
-		qemuArgs = append(qemuArgs, "-serial", fmt.Sprintf("file:%s", conf.SerialToFile))
+	if conf.SerialType == "serial" {
+		// Emulated ISA serial: guest uses ttyS0.
+		if conf.SerialToSocket != "" {
+			qemuArgs = append(qemuArgs, "-serial", fmt.Sprintf("unix:%s,server,wait", conf.SerialToSocket))
+		} else if conf.SerialToFile != "" {
+			qemuArgs = append(qemuArgs, "-serial", fmt.Sprintf("file:%s", conf.SerialToFile))
+		}
+	} else {
+		// Virtio-serial (default): guest uses hvc0.
+		if conf.SerialToSocket != "" {
+			qemuArgs = append(qemuArgs,
+				"-device", "virtio-serial-pci",
+				"-chardev", fmt.Sprintf("socket,id=virtconsole0,path=%s,server=on,wait=on", conf.SerialToSocket),
+				"-device", "virtconsole,chardev=virtconsole0",
+			)
+		} else if conf.SerialToFile != "" {
+			qemuArgs = append(qemuArgs,
+				"-device", "virtio-serial-pci",
+				"-chardev", fmt.Sprintf("file,id=virtconsole0,path=%s", conf.SerialToFile),
+				"-device", "virtconsole,chardev=virtconsole0",
+			)
+		}
 	}
 
 	// OVMF firmware.

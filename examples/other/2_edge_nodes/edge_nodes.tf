@@ -100,8 +100,12 @@ resource "zedamigo_eve_installer" "eve_os_installer_1453" {
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
-   # This is actually better for the QEMU VM case.
-   set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   # We need to set the console to the serial port. Originally we were using the
+   # emulated ISA serial port in QEMU which is then available to the Linux guest
+   # (EVE-OS) as ttyS0, however on macOS (with vfkit) only virtio-serial is available
+   # which will be hvc0. QEMU is now also switched to virtio-serial.
+   # set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
    EOF
 }
 
@@ -113,8 +117,12 @@ resource "zedamigo_eve_installer" "eve_os_installer_1600" {
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
-   # This is actually better for the QEMU VM case.
-   set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   # We need to set the console to the serial port. Originally we were using the
+   # emulated ISA serial port in QEMU which is then available to the Linux guest
+   # (EVE-OS) as ttyS0, however on macOS (with vfkit) only virtio-serial is available
+   # which will be hvc0. QEMU is now also switched to virtio-serial.
+   # set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
    EOF
 }
 

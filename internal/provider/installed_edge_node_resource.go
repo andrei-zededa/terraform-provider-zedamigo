@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -55,6 +59,7 @@ type InstalledNodeModel struct {
 	OvmfVars         types.String `tfsdk:"ovmf_vars"`
 	Success          types.Bool   `tfsdk:"success"`
 	SoftSerial       types.String `tfsdk:"soft_serial"`
+	SerialType       types.String `tfsdk:"serial_type"`
 }
 
 func (r *InstalledNode) getResourceDir(id string) string {
@@ -152,6 +157,26 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "EVE-OS soft serial number extracted from install log",
 				Computed:            true,
 			},
+			"serial_type": schema.StringAttribute{
+				Description: `Type of serial device for the installation VM. Valid values: "virtio" (default) and "serial". ` +
+					`"virtio" uses a virtio-serial device; the Linux guest (EVE-OS) must use console=hvc0. ` +
+					`"serial" uses an emulated ISA serial port; the Linux guest must use console=ttyS0. ` +
+					`On macOS (vfkit), only "virtio" is supported.`,
+				MarkdownDescription: "Type of serial device for the installation VM.\n\n" +
+					"Valid values: `\"virtio\"` (default) and `\"serial\"`.\n\n" +
+					"- `virtio`: Uses `virtio-serial-pci`. The Linux guest (EVE-OS) must use `console=hvc0`.\n" +
+					"- `serial`: Uses emulated ISA serial. The Linux guest must use `console=ttyS0`.\n\n" +
+					"**macOS (vfkit):** Only `\"virtio\"` is supported.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("virtio"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("virtio", "serial"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 		},
 	}
 }
@@ -229,6 +254,12 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	if runtime.GOOS == "darwin" && data.SerialType.ValueString() == "serial" {
+		resp.Diagnostics.AddError("Invalid serial_type for macOS",
+			`On macOS (vfkit), only serial_type = "virtio" is supported.`)
+		return
+	}
+
 	vmConf := hypervisor.VMConfig{
 		Name:           data.Name.ValueString(),
 		ID:             data.ID.ValueString(),
@@ -239,6 +270,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		Nic0:           nic0FmtInstall,
 		SwTPMSocket:    data.SwTPMSock.ValueString(),
 		SerialToFile:   filepath.Join(d, "serial_console_install.log"),
+		SerialType:     data.SerialType.ValueString(),
 		IsInstallation: true,
 	}
 
