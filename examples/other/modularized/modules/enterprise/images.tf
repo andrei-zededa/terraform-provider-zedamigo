@@ -10,6 +10,6 @@ resource "zedcloud_image" "ubuntu_24_04" {
   image_format     = "QCOW2"
   image_arch       = "AMD64"
   image_sha256     = "7aa6d9f5e8a3a55c7445b138d31a73d1187871211b2b7da9da2e1a6cbf169b21"
-  image_size_bytes = 629048832
+  image_size_bytes = 629048832 # 600MB 
   image_type       = "IMAGE_TYPE_APPLICATION"
 }

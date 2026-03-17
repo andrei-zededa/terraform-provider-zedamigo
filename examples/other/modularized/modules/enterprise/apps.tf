@@ -125,8 +125,12 @@ resource "zedcloud_application" "ubuntu_vm" {
       imageformat = "QCOW2"
       imageid     = zedcloud_image.ubuntu_24_04.id
       imagename   = zedcloud_image.ubuntu_24_04.name
-      # maxsize     = tostring(zedcloud_image.ubuntu_24_04.image_size_bytes)
-      maxsize     = "0"
+      # maxsize is in kilobytes. The image (QCOW2 file) is 600MB but it defines
+      # a disk of 3.5GB. If we leave maxsize = 0 then the actual maxsize of the
+      # mutable volume will be 3.5GB. We could set it to something bigger than
+      # 3.5GB.
+      # maxsize     = 6 * 1024 * 1024 # 6GB
+      maxsize     = 0
       mountpath   = "/"
       ignorepurge = false
       preserve    = false
@@ -140,8 +144,12 @@ resource "zedcloud_application" "ubuntu_vm" {
       cleartext   = false
       drvtype     = "HDD"
       imageformat = "QCOW2"
-      mountpath   = "/data"                           # Actual mount path depends on the guest OS.
-      maxsize     = tostring(10 * 1024 * 1024 * 1024) # 10GB. Actual max size depends on what the app instance sets when it creates the volume-instance.
+      # maxsize is in kilobytes. Actual max size depends on what the app
+      # instance sets when it creates the volume-instance.
+      maxsize = 10 * 1024 * 1024 # 10GB.
+      # For VMs this is ignored since the actual mount path depends on the guest
+      # OS, this would be important for apps of type container.
+      mountpath   = "/data"
       ignorepurge = true
       preserve    = true
       readonly    = false
@@ -154,8 +162,14 @@ resource "zedcloud_application" "ubuntu_vm" {
       cleartext   = false
       drvtype     = "HDD"
       imageformat = "QCOW2"
-      mountpath   = "/data"                           # Actual mount path depends on the guest OS.
-      maxsize     = tostring(10 * 1024 * 1024 * 1024) # 10GB. Actual max size depends on what the app instance sets when it creates the volume-instance.
+      # maxsize is in kilobytes. Actual max size depends on what the app
+      # instance sets when it creates the volume-instance.
+      # maxsize = 6 * 1024 * 1024 # 6GB.
+      # We should get the same behavior if this is a string.
+      maxsize = tostring(6 * 1024 * 1024) # 6GB.
+      # For VMs this is ignored since the actual mount path depends on the guest
+      # OS, this would be important for apps of type container.
+      mountpath   = "/data"
       ignorepurge = true
       preserve    = true
       readonly    = false

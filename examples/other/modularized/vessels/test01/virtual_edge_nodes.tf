@@ -15,7 +15,7 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso" {
   grub_cfg        = <<-EOF
    set_getty
    # This is actually better for the QEMU VM case.
-   set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
    EOF
 }
 

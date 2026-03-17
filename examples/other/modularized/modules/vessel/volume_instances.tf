@@ -6,7 +6,8 @@ resource "zedcloud_volume_instance" "app_vol_ctree_or_bstor" {
 
   device_id = module.edge_node[each.value.node_key].id
 
-  size_bytes  = each.value.image_spec.maxsize
+  # App definition image maxsize is in kilobytes.
+  size_bytes  = each.value.image_spec.maxsize * 1024
   type        = each.value.is_content_tree ? "VOLUME_INSTANCE_TYPE_CONTENT_TREE" : "VOLUME_INSTANCE_TYPE_BLOCKSTORAGE"
   accessmode  = "VOLUME_INSTANCE_ACCESS_MODE_READWRITE"
   multiattach = false
@@ -34,7 +35,8 @@ resource "zedcloud_volume_instance" "app_vol_bstor_for_each_ctree" {
   # Link to the content-tree previously created.
   content_tree_id = zedcloud_volume_instance.app_vol_ctree_or_bstor[each.key].id
 
-  size_bytes  = each.value.image_spec.maxsize
+  # App definition image maxsize is in kilobytes.
+  size_bytes  = each.value.image_spec.maxsize * 1024
   type        = "VOLUME_INSTANCE_TYPE_BLOCKSTORAGE"
   accessmode  = "VOLUME_INSTANCE_ACCESS_MODE_READWRITE"
   multiattach = false
