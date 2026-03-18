@@ -18,7 +18,7 @@ variable "ssh_pub_key" {
 # ensure that.
 variable "config_suffix" {
   type    = string
-  default = "982g"
+  default = "13f"
 }
 
 variable "DOCKERHUB_USERNAME" {

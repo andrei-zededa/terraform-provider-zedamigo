@@ -80,7 +80,7 @@ resource "zedcloud_application" "CONTAINER_APP_DEF" {
 
     images {
       cleartext   = false
-      ignorepurge = true
+      ignorepurge = false
       imageformat = "CONTAINER"
       imageid     = zedcloud_image.CONTAINER_IMAGE.id
       imagename   = zedcloud_image.CONTAINER_IMAGE.name

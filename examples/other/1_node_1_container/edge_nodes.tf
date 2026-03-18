@@ -53,21 +53,20 @@ resource "zedamigo_eve_installer" "eve_os_installer_iso" {
   authorized_keys = var.ssh_pub_key
   grub_cfg        = <<-EOF
    set_getty
-   # This is actually better for the QEMU VM case.
-   set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
    EOF
 }
 
-resource "zedamigo_disk_image" "empty_disk_100G" {
-  name    = "empty_disk_100G"
-  size_mb = 100000 # ~100GB
+resource "zedamigo_disk_image" "empty_disk_20G" {
+  name    = "empty_disk_20G"
+  size_mb = 20000 # ~20GB
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL" {
   name            = "ENODE_TEST_INSTALL_${var.config_suffix}"
   serial_no       = zedcloud_edgenode.ENODE_TEST.serialno
   installer_iso   = zedamigo_eve_installer.eve_os_installer_iso.filename
-  disk_image_base = zedamigo_disk_image.empty_disk_100G.filename
+  disk_image_base = zedamigo_disk_image.empty_disk_20G.filename
 }
 
 resource "zedamigo_edge_node" "ENODE_TEST_VM" {
