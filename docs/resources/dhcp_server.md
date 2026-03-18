@@ -66,6 +66,7 @@ resource "zedamigo_dhcp_server" "test" {
 
 - `lease_time` (Number) DHCP lease time in seconds. This determines how long a client can use an assigned IP address before needing to renew the lease.
 				Defaults to 3600 seconds (1 hour).
+- `netns` (String) Network namespace in which to run the DHCP server
 - `pool` (Block, Optional) DHCP v4 address pool configuration for dynamic allocation (see [below for nested schema](#nestedblock--pool))
 - `state` (String) Desired state of the DHCP server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.

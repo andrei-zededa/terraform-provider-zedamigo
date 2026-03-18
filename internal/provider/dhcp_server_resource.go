@@ -88,6 +88,7 @@ type DHCPServerModel struct {
 	ConfigFile   types.String           `tfsdk:"config_file"`
 	PIDFile      types.String           `tfsdk:"pid_file"`
 	State        types.String           `tfsdk:"state"`
+	NetNS        types.String           `tfsdk:"netns"`
 }
 
 func (r *DHCPServer) getResourceDir(id string) string {
@@ -171,6 +172,13 @@ func (r *DHCPServer) Schema(ctx context.Context, req resource.SchemaRequest, res
 				Description: "Desired state of the DHCP server daemon",
 				MarkdownDescription: undent.Md(`Desired state of the DHCP server daemon. Can be "running" or "stopped".
 				Defaults to "running". The provider will automatically start or stop the daemon to match this state.`),
+			},
+			"netns": schema.StringAttribute{
+				Description: "Network namespace in which to run the DHCP server",
+				Optional:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -488,11 +496,28 @@ func (r *DHCPServer) ImportState(ctx context.Context, req resource.ImportStateRe
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-// startDHCPServer starts the DHCP server daemon for the given resource
+// startDHCPServer starts the DHCP server daemon for the given resource.
+// When netns is set, the daemon is started inside the network namespace using
+// `ip netns exec <ns>`.
 func (r *DHCPServer) startDHCPServer(d string, data *DHCPServerModel) error {
+	netns := ""
+	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
+		netns = data.NetNS.ValueString()
+	}
+
 	srvCmd := os.Args[0]
 	srvArgs := []string{}
-	if r.providerConf.UseSudo {
+	if netns != "" {
+		// Wrap with: ip netns exec <ns> <binary> ...
+		// or: sudo -n ip netns exec <ns> <binary> ...
+		if r.providerConf.UseSudo {
+			srvCmd = r.providerConf.Sudo
+			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, os.Args[0]}
+		} else {
+			srvCmd = r.providerConf.IP
+			srvArgs = []string{"netns", "exec", netns, os.Args[0]}
+		}
+	} else if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
 		srvArgs = []string{"-n", os.Args[0]}
 	}

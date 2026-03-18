@@ -265,6 +265,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewDHCP6Server,
 		NewRADV,
 		NewLocalDatastore,
+		NewNetNS,
 	}
 }
 

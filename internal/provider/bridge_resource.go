@@ -54,6 +54,7 @@ type BridgeModel struct {
 	MACAddress  types.String `tfsdk:"mac_address"`
 	IPv4Address types.String `tfsdk:"ipv4_address"`
 	IPv6Address types.String `tfsdk:"ipv6_address"`
+	NetNS       types.String `tfsdk:"netns"`
 }
 
 func (r *Bridge) getResourceDir(id string) string {
@@ -108,6 +109,13 @@ func (r *Bridge) Schema(ctx context.Context, req resource.SchemaRequest, resp *r
 			"ipv6_address": schema.StringAttribute{
 				Description: "IPv6 address for the bridge",
 				Optional:    true,
+			},
+			"netns": schema.StringAttribute{
+				Description: "Network namespace in which to create the bridge",
+				Optional:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 		},
 	}
@@ -169,12 +177,11 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 
 	br := data.Name.ValueString()
 
-	ipCmd := r.providerConf.IP
-	ipArgs := []string{}
-	if r.providerConf.UseSudo {
-		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{"-n", r.providerConf.IP}
+	netns := ""
+	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
+		netns = data.NetNS.ValueString()
 	}
+	ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
 
 	// Create the bridge.
 	moreArgs := []string{"link", "add", br, "type", "bridge"}
@@ -324,12 +331,11 @@ func (r *Bridge) Read(ctx context.Context, req resource.ReadRequest, resp *resou
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	ipCmd := r.providerConf.IP
-	ipArgs := []string{}
-	if r.providerConf.UseSudo {
-		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{"-n", r.providerConf.IP}
+	netns := ""
+	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
+		netns = data.NetNS.ValueString()
 	}
+	ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
 
 	// Read the bridge current state.
 	if diags, err := r.readBridge(d, ipCmd, ipArgs, &data); err != nil {
@@ -375,12 +381,11 @@ func (r *Bridge) Delete(ctx context.Context, req resource.DeleteRequest, resp *r
 	br := data.Name.ValueString()
 	d := r.getResourceDir(data.ID.ValueString())
 
-	ipCmd := r.providerConf.IP
-	ipArgs := []string{}
-	if r.providerConf.UseSudo {
-		ipCmd = r.providerConf.Sudo
-		ipArgs = []string{"-n", r.providerConf.IP}
+	netns := ""
+	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
+		netns = data.NetNS.ValueString()
 	}
+	ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
 
 	// Delete an existing bridge.
 	moreArgs := []string{"link", "delete", br, "type", "bridge"}
