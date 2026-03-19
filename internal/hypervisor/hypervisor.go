@@ -68,4 +68,8 @@ type Hypervisor interface {
 
 	// Stop shuts down a running VM.
 	Stop(ctx context.Context, resourceDir string) error
+
+	// ApplyCPUPins pins vCPU threads to host CPUs. Must be called after the VM
+	// process is fully started (i.e., after serial socket clients have connected).
+	ApplyCPUPins(ctx context.Context, conf VMConfig) error
 }

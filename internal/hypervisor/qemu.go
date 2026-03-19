@@ -342,18 +342,18 @@ set -eu;
 		}
 	}
 
-	// CPU pinning (non-installation only).
-	if !conf.IsInstallation && len(conf.CPUPins) > 0 {
-		cpus := int64(4)
-		if conf.CPUs > 0 {
-			cpus = conf.CPUs
-		}
-		if err := h.applyCPUPins(ctx, d, conf.CPUPins, int(cpus)); err != nil {
-			return fmt.Errorf("CPU pinning failed: %w", err)
-		}
-	}
-
 	return nil
+}
+
+func (h *QEMUHypervisor) ApplyCPUPins(ctx context.Context, conf VMConfig) error {
+	if conf.IsInstallation || len(conf.CPUPins) == 0 {
+		return nil
+	}
+	cpus := int64(4)
+	if conf.CPUs > 0 {
+		cpus = conf.CPUs
+	}
+	return h.applyCPUPins(ctx, conf.ResourceDir, conf.CPUPins, int(cpus))
 }
 
 const (

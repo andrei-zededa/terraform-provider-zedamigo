@@ -494,6 +494,12 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		}
 	}
 
+	if err := r.providerConf.Hypervisor.ApplyCPUPins(ctx, vmConf); err != nil {
+		resp.Diagnostics.AddError("Edge Node Resource Error",
+			fmt.Sprintf("Failed to apply CPU pinning: %v", err))
+		return
+	}
+
 	x, err := r.providerConf.Hypervisor.Status(ctx, d)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Edge Node Resource Read Error",
