@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v3"
 )
 
@@ -72,65 +74,90 @@ func tapMoverMain() {
 		"timeout_s", cfg.TimeoutS,
 	)
 
-	// Signal handling for clean exit.
+	timeout := time.Duration(cfg.TimeoutS) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Signal handling: cancel context on SIGINT/SIGTERM.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	pollInterval := time.Duration(cfg.PollIntervalMs) * time.Millisecond
-	timeout := time.Duration(cfg.TimeoutS) * time.Second
-	deadline := time.Now().Add(timeout)
-
-	operstateFile := fmt.Sprintf("/sys/class/net/%s/operstate", cfg.TapName)
-
-	// Poll loop: wait for QEMU to open the TAP.
-	for {
+	go func() {
 		select {
 		case sig := <-sigChan:
-			logger.Info("Received signal, exiting", "signal", sig)
-			writeStatus(cfg.StatusFile, tapMoverStatus{
-				Status:    "error",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Error:     fmt.Sprintf("received signal %s", sig),
-			})
+			logger.Info("Received signal, cancelling", "signal", sig)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	// Subscribe to netlink link events.
+	updates := make(chan netlink.LinkUpdate)
+	done := make(chan struct{})
+	defer close(done)
+	if err := netlink.LinkSubscribe(updates, done); err != nil {
+		errMsg := fmt.Sprintf("failed to subscribe to netlink events: %v", err)
+		logger.Error(errMsg)
+		writeStatus(cfg.StatusFile, tapMoverStatus{
+			Status:    "error",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Error:     errMsg,
+		})
+		os.Exit(1)
+	}
+
+	logger.Info("Waiting for link event on TAP", "tap", cfg.TapName)
+
+	for {
+		select {
+		case update := <-updates:
+			if update.Attrs().Name != cfg.TapName {
+				continue
+			}
+			operstate := update.Attrs().OperState.String()
+			logger.Info("Link event for TAP detected",
+				"tap", cfg.TapName,
+				"operstate", operstate,
+			)
+			moveTAP(cfg, operstate, logger)
+			return
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				logger.Error("Timeout waiting for TAP link event", "tap", cfg.TapName)
+				writeStatus(cfg.StatusFile, tapMoverStatus{
+					Status:    "error",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Error:     fmt.Sprintf("timeout after %ds", cfg.TimeoutS),
+				})
+			} else {
+				writeStatus(cfg.StatusFile, tapMoverStatus{
+					Status:    "error",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Error:     "cancelled by signal",
+				})
+			}
 			os.Exit(1)
-		default:
 		}
+	}
+}
 
-		if time.Now().After(deadline) {
-			logger.Error("Timeout waiting for QEMU to open TAP", "tap", cfg.TapName)
-			writeStatus(cfg.StatusFile, tapMoverStatus{
-				Status:    "error",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Error:     fmt.Sprintf("timeout after %ds", cfg.TimeoutS),
-			})
-			os.Exit(1)
-		}
+// moveTAP moves the TAP interface into the network namespace and configures it.
+func moveTAP(cfg tapMoverCfg, operstate string, logger *slog.Logger) {
+	// Move the TAP into the network namespace.
+	if err := runIP(cfg, "link", "set", cfg.TapName, "netns", cfg.NetNS); err != nil {
+		errMsg := fmt.Sprintf("failed to move TAP to netns: %v", err)
+		logger.Error(errMsg)
+		writeStatus(cfg.StatusFile, tapMoverStatus{
+			Status:    "error",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Error:     errMsg,
+		})
+		os.Exit(1)
+	}
 
-		data, err := os.ReadFile(operstateFile)
-		if err != nil {
-			logger.Warn("Can't read operstate, TAP may not exist yet", "error", err)
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		operstate := strings.TrimSpace(string(data))
-		if operstate == "down" {
-			// TAP is created but nobody has opened it yet.
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		// Operstate is not "down" (typically "unknown") — QEMU has opened
-		// the TAP fd via ioctl.
-		logger.Info("TAP opened by QEMU, moving to netns",
-			"tap", cfg.TapName,
-			"operstate", operstate,
-			"netns", cfg.NetNS,
-		)
-
-		// Move the TAP into the network namespace.
-		if err := runIP(cfg, "link", "set", cfg.TapName, "netns", cfg.NetNS); err != nil {
-			errMsg := fmt.Sprintf("failed to move TAP to netns: %v", err)
+	// Attach to bridge inside the netns (if master is specified).
+	if cfg.Master != "" {
+		if err := runIPInNetns(cfg, "link", "set", cfg.TapName, "master", cfg.Master); err != nil {
+			errMsg := fmt.Sprintf("failed to set master on TAP inside netns: %v", err)
 			logger.Error(errMsg)
 			writeStatus(cfg.StatusFile, tapMoverStatus{
 				Status:    "error",
@@ -139,47 +166,32 @@ func tapMoverMain() {
 			})
 			os.Exit(1)
 		}
-
-		// Attach to bridge inside the netns (if master is specified).
-		if cfg.Master != "" {
-			if err := runIPInNetns(cfg, "link", "set", cfg.TapName, "master", cfg.Master); err != nil {
-				errMsg := fmt.Sprintf("failed to set master on TAP inside netns: %v", err)
-				logger.Error(errMsg)
-				writeStatus(cfg.StatusFile, tapMoverStatus{
-					Status:    "error",
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Error:     errMsg,
-				})
-				os.Exit(1)
-			}
-		}
-
-		// Set state inside the netns (if specified).
-		if cfg.State != "" {
-			if err := runIPInNetns(cfg, "link", "set", cfg.TapName, cfg.State); err != nil {
-				errMsg := fmt.Sprintf("failed to set state on TAP inside netns: %v", err)
-				logger.Error(errMsg)
-				writeStatus(cfg.StatusFile, tapMoverStatus{
-					Status:    "error",
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Error:     errMsg,
-				})
-				os.Exit(1)
-			}
-		}
-
-		logger.Info("TAP successfully moved and configured",
-			"tap", cfg.TapName,
-			"netns", cfg.NetNS,
-		)
-
-		writeStatus(cfg.StatusFile, tapMoverStatus{
-			Status:       "moved",
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
-			OperstateWas: operstate,
-		})
-		return
 	}
+
+	// Set state inside the netns (if specified).
+	if cfg.State != "" {
+		if err := runIPInNetns(cfg, "link", "set", cfg.TapName, cfg.State); err != nil {
+			errMsg := fmt.Sprintf("failed to set state on TAP inside netns: %v", err)
+			logger.Error(errMsg)
+			writeStatus(cfg.StatusFile, tapMoverStatus{
+				Status:    "error",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Error:     errMsg,
+			})
+			os.Exit(1)
+		}
+	}
+
+	logger.Info("TAP successfully moved and configured",
+		"tap", cfg.TapName,
+		"netns", cfg.NetNS,
+	)
+
+	writeStatus(cfg.StatusFile, tapMoverStatus{
+		Status:       "moved",
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		OperstateWas: operstate,
+	})
 }
 
 // runIP runs an ip command in the default namespace.
