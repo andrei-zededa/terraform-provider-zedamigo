@@ -20,8 +20,12 @@ import (
 // getCPUThreadIDs reads /proc filesystem to find QEMU vCPU thread IDs.
 // Returns a map[cpuNum]threadID for threads named "CPU N/KVM".
 func getCPUThreadIDs(qemuPID int, numCPUs int) (map[int]int, error) {
-	taskDir := fmt.Sprintf("/proc/%d/task", qemuPID)
+	return getCPUThreadIDsFromDir(fmt.Sprintf("/proc/%d/task", qemuPID), numCPUs)
+}
 
+// getCPUThreadIDsFromDir scans a task directory for QEMU vCPU threads.
+// Extracted for testability — accepts an arbitrary directory path.
+func getCPUThreadIDsFromDir(taskDir string, numCPUs int) (map[int]int, error) {
 	entries, err := os.ReadDir(taskDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read task directory: %w", err)
@@ -86,16 +90,18 @@ func pinCPUThreads(ctx context.Context, h *QEMUHypervisor, qemuPID int, cpuPins 
 		return fmt.Errorf("failed to find CPU threads after retries: %w", err)
 	}
 
-	// Pin each vCPU thread to corresponding host CPU
+	// Pin each vCPU thread to corresponding host CPU.
+	// Try all pins so the user sees ALL failures, not just the first.
+	var pinErrors []string
 	for cpuNum := 0; cpuNum < numCPUs; cpuNum++ {
 		threadID, ok := cpuThreads[cpuNum]
 		if !ok {
-			return fmt.Errorf("CPU %d thread not found", cpuNum)
+			pinErrors = append(pinErrors, fmt.Sprintf("CPU %d: thread not found", cpuNum))
+			continue
 		}
 
 		hostCPU := cpuPins[cpuNum]
 
-		// Build taskset command
 		tasksetArgs := []string{
 			"-cp",
 			fmt.Sprintf("%d", hostCPU),
@@ -116,6 +122,7 @@ func pinCPUThreads(ctx context.Context, h *QEMUHypervisor, qemuPID int, cpuPins 
 				"host_cpu":  hostCPU,
 				"error":     err,
 			})
+			pinErrors = append(pinErrors, fmt.Sprintf("CPU %d (tid %d -> core %d): %v", cpuNum, threadID, hostCPU, err))
 		} else {
 			tflog.Debug(ctx, "Pinned CPU thread", map[string]any{
 				"cpu_num":   cpuNum,
@@ -123,6 +130,10 @@ func pinCPUThreads(ctx context.Context, h *QEMUHypervisor, qemuPID int, cpuPins 
 				"host_cpu":  hostCPU,
 			})
 		}
+	}
+
+	if len(pinErrors) > 0 {
+		return fmt.Errorf("taskset failed for %d vCPU(s):\n  %s", len(pinErrors), strings.Join(pinErrors, "\n  "))
 	}
 
 	return nil
