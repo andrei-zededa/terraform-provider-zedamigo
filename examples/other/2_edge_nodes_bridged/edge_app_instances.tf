@@ -1,3 +1,8 @@
+resource "random_password" "vm_password" {
+  length  = 10
+  special = false
+}
+
 locals {
   nodes = {
     "ENODE_TEST_AAAA" = zedcloud_edgenode.ENODE_TEST_AAAA
@@ -58,6 +63,9 @@ locals {
     },
     "SSH_PUB_KEY" = {
       value = var.edge_node_ssh_pub_key
+    },
+    "PASSWORD" = {
+      value = random_password.vm_password.result
     },
   }
 
@@ -165,9 +173,11 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
 
 output "EDGE_APP_INSTANCES" {
   description = "Print edge-app-instances which have been created for every edge-node which joined the project"
+  sensitive   = true
   value = {
     for x in zedcloud_application_instance.APP_INSTANCES_VMS : x.name => {
-      id = x.id
+      id       = x.id
+      password = random_password.vm_password.result
     }
   }
 }

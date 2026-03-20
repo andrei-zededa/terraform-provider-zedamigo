@@ -31,6 +31,16 @@ variable "UBUNTU_CLOUD_INIT_VARS" {
       max_length = "200"
       value      = ""
     },
+    {
+      name       = "PASSWORD"
+      default    = ""
+      required   = false
+      label      = "The password for the created user (default: empty, set per-instance)."
+      format     = "VARIABLE_FORMAT_TEXT"
+      encode     = "FILE_ENCODING_UNSPECIFIED"
+      max_length = "200"
+      value      = ""
+    },
   ]
 }
 

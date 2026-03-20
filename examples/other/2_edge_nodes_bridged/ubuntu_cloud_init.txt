@@ -14,6 +14,12 @@ users:
     ssh_authorized_keys:
       - ####SSH_PUB_KEY####
 
+# Set the password for the created user.
+chpasswd:
+  expire: false
+  list: |
+    ####USERNAME####:####PASSWORD####
+
 # Remove all users except just the one creted and required system users.
 userdel:
   remove: true
