@@ -165,6 +165,13 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       name         = "app_eth1"
       optional     = false
       privateip    = false
+
+      acls {
+        matches {
+          type  = "ip"
+          value = "0.0.0.0/0"
+        }
+      }
     }
 
     interfaces {
@@ -172,6 +179,13 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       name         = "app_eth2"
       optional     = false
       privateip    = false
+
+      acls {
+        matches {
+          type  = "ip"
+          value = "0.0.0.0/0"
+        }
+      }
     }
 
     owner {
@@ -186,11 +200,11 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
     }
     resources {
       name  = "cpus"
-      value = "1"
+      value = "6"
     }
     resources {
       name  = "memory"
-      value = "393216.00"
+      value = "2097152.00"
     }
     resources {
       name  = "storage"

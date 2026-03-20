@@ -1,8 +1,13 @@
+resource "zedamigo_netns" "TEST_NS_A" {
+  name = "TEST_NS_A"
+}
+
 resource "zedamigo_bridge" "BRIDGE_A" {
   name         = "br1-${var.config_suffix}"
   mtu          = "1500"
   state        = "up"
   ipv4_address = "10.99.1.1/24"
+  netns        = zedamigo_netns.TEST_NS_A.name
 }
 
 resource "zedamigo_dhcp_server" "DHCP_A" {
@@ -16,6 +21,7 @@ resource "zedamigo_dhcp_server" "DHCP_A" {
     end   = "10.99.1.79"
   }
   lease_time = 86400
+  netns      = zedamigo_netns.TEST_NS_A.name
 }
 
 resource "zedamigo_tap" "TAP_A_AAAA" {
@@ -24,14 +30,20 @@ resource "zedamigo_tap" "TAP_A_AAAA" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_A.name
+  netns  = zedamigo_netns.TEST_NS_A.name
 }
 
-resource "zedamigo_tap" "TAP_A_BBBB" {
-  name   = "tapA-BB-${var.config_suffix}"
-  mtu    = "1500"
-  state  = "up"
-  group  = "kvm"
-  master = zedamigo_bridge.BRIDGE_A.name
+#? resource "zedamigo_tap" "TAP_A_BBBB" {
+#?   name   = "tapA-BB-${var.config_suffix}"
+#?   mtu    = "1500"
+#?   state  = "up"
+#?   group  = "kvm"
+#?   master = zedamigo_bridge.BRIDGE_A.name
+#?   netns  = zedamigo_netns.TEST_NS_A.name
+#? }
+
+resource "zedamigo_netns" "TEST_NS_B" {
+  name = "TEST_NS_B"
 }
 
 resource "zedamigo_bridge" "BRIDGE_B" {
@@ -39,6 +51,7 @@ resource "zedamigo_bridge" "BRIDGE_B" {
   mtu          = "1500"
   state        = "up"
   ipv4_address = "10.99.2.1/24"
+  netns        = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_dhcp_server" "DHCP_B" {
@@ -52,6 +65,7 @@ resource "zedamigo_dhcp_server" "DHCP_B" {
     end   = "10.99.2.79"
   }
   lease_time = 86400
+  netns      = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_tap" "TAP_B_AAAA" {
@@ -60,12 +74,14 @@ resource "zedamigo_tap" "TAP_B_AAAA" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_B.name
+  netns  = zedamigo_netns.TEST_NS_B.name
 }
 
-resource "zedamigo_tap" "TAP_B_BBBB" {
-  name   = "tapB-BB-${var.config_suffix}"
-  mtu    = "1500"
-  state  = "up"
-  group  = "kvm"
-  master = zedamigo_bridge.BRIDGE_B.name
-}
+#? resource "zedamigo_tap" "TAP_B_BBBB" {
+#?   name   = "tapB-BB-${var.config_suffix}"
+#?   mtu    = "1500"
+#?   state  = "up"
+#?   group  = "kvm"
+#?   master = zedamigo_bridge.BRIDGE_B.name
+#?   netns  = zedamigo_netns.TEST_NS_B.name
+#? }

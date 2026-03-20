@@ -6,7 +6,7 @@ resource "random_password" "vm_password" {
 locals {
   nodes = {
     "ENODE_TEST_AAAA" = zedcloud_edgenode.ENODE_TEST_AAAA
-    "ENODE_TEST_BBBB" = zedcloud_edgenode.ENODE_TEST_BBBB
+    #? "ENODE_TEST_BBBB" = zedcloud_edgenode.ENODE_TEST_BBBB
   }
 }
 
@@ -84,7 +84,7 @@ locals {
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   for_each = local.nodes
 
-  name      = "ubuntu_test_on_${each.value.id}"
+  name      = "ubuntu_test_on_${each.value.name}"
   title     = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name} for ${each.value.name}"
   device_id = each.value.id
   app_id    = zedcloud_application.UBUNTU_VM_DEF.id
@@ -133,7 +133,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   }
 
   vminfo {
-    cpus = 1
+    cpus = 6
     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
     vnc  = true
   }
