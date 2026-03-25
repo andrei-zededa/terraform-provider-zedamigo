@@ -142,7 +142,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     cleartext = true
     mountpath = "/"
     imagename = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].imagename
-    maxsize   = "0"
+    maxsize   = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].maxsize
     preserve  = false
     readonly  = false
     drvtype   = ""

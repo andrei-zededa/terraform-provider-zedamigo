@@ -123,7 +123,7 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
 #### QEMU VM with EVE-OS.
 resource "zedamigo_disk_image" "empty_disk" {
   name    = "empty_disk"
-  size_mb = 20000 # ~20GB
+  size_mb = 100000 # ~100GB
 }
 
 #### This creates a custom EVE-OS installer ISO, it basically runs
@@ -211,7 +211,7 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name     = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
   cpus     = 8
   cpu_pins = [8, 9, 10, 11, 12, 13, 14, 15]
-  mem      = "8G"
+  mem      = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true

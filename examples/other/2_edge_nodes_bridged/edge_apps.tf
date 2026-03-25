@@ -113,7 +113,8 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       imageformat = "QCOW2"
       imageid     = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.id : zedcloud_image.ubuntu_24_04_server_cloud_amd64.id
       imagename   = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.name : zedcloud_image.ubuntu_24_04_server_cloud_amd64.name
-      maxsize     = "0"
+      # maxsize is in kilobytes.
+      maxsize     = 5242880 # 5GB
       mountpath   = "/"
       ignorepurge = false
       preserve    = false

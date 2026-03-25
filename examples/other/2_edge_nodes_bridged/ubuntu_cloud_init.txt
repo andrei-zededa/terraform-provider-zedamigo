@@ -67,6 +67,7 @@ packages:
   - dnsutils
   - python3-scapy
   - iptables
+  - stress-ng
 
 # Update the package list and upgrade all packages on first boot.
 package_update: true
