@@ -453,7 +453,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	}
 
 	// Delete an existing TAP.
-	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap"}
+	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap", "multi_queue"}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
