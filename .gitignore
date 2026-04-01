@@ -1,6 +1,10 @@
 .claude/
+**/.claude/
 internal/socket/cmd/socket-tailer/socket-tailer
+misc/tf_state_backend_http/*.log
+misc/tf_state_backend_http/tf_state_backend_http
 terraform-provider-zedamigo*
+**/terraform_states/
 **/*.tfstate*
 **/.terraform/
 **/.terraform.lock.hcl
