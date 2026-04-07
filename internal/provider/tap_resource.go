@@ -205,7 +205,8 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	}
 
 	// Create the TAP.
-	moreArgs := []string{"tuntap", "add", "dev", tapIf, "mode", "tap", "multi_queue"}
+	moreArgs := []string{"tuntap", "add", "dev", tapIf, "mode", "tap"}
+	// moreArgs := []string{"tuntap", "add", "dev", tapIf, "mode", "tap", "multi_queue"}
 	if !data.Owner.IsNull() && !data.Owner.IsUnknown() {
 		moreArgs = append(moreArgs, "user", data.Owner.ValueString())
 	}
@@ -453,7 +454,8 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	}
 
 	// Delete an existing TAP.
-	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap", "multi_queue"}
+	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap"}
+	// moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap", "multi_queue"}
 	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
