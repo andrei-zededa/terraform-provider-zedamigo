@@ -16,10 +16,10 @@ variable "vessel_project_name" {
 variable "management_network" {
   description = "Optional per-vessel management network with static IP configuration"
   type = object({
-    name    = string
-    title   = optional(string, "")
-    kind    = optional(string, "NETWORK_KIND_V4_ONLY")
-    mtu     = optional(number, 0)
+    name  = string
+    title = optional(string, "")
+    kind  = optional(string, "NETWORK_KIND_V4_ONLY")
+    mtu   = optional(number, 0)
     ip = object({
       dhcp    = optional(string, "NETWORK_DHCP_TYPE_STATIC")
       subnet  = string
@@ -33,12 +33,12 @@ variable "management_network" {
 variable "nodes" {
   description = "Map of edge nodes to create"
   type = map(object({
-    model_name         = string
-    serialno           = string
-    onboarding_key     = optional(string, "")
-    ssh_pub_key        = optional(string, "")
-    tags               = optional(map(string), {})
-    vlans              = optional(map(list(number)), {})
+    model_name     = string
+    serialno       = string
+    onboarding_key = optional(string, "")
+    ssh_pub_key    = optional(string, "")
+    tags           = optional(map(string), {})
+    vlans          = optional(map(list(number)), {})
     apps = optional(map(object({
       cloud_init_vars = optional(map(string), {})
       drive_images    = optional(map(string), {})
@@ -61,21 +61,31 @@ variable "vessel_datastores" {
 }
 
 locals {
-  # Derive edge-node interfaces automatically from the model's io_member_list
+  # Sort and filter the model's io_member_list to only include ethernet
+  # interfaces in a deterministic order (sorted by phylabel).
+  eth_io_members = {
+    for model_name, model in data.zedcloud_model.enterprise : model_name => [
+      for label in sort([for m in model.io_member_list : m.phylabel if m.ztype == "IO_TYPE_ETH"]) :
+      [for m in model.io_member_list : m if m.phylabel == label][0]
+    ]
+  }
+
+  # Derive edge-node interfaces from the sorted/filtered list.
   node_interfaces = {
     for node_key, node in var.nodes : node_key => [
-      for io in data.zedcloud_model.enterprise[node.model_name].io_member_list : {
+      for io in local.eth_io_members[node.model_name] : {
         intfname   = io.logicallabel
         intf_usage = io.usage
         cost       = io.cost
-        netname    = contains(keys(node.interface_networks), io.logicallabel) ? (
+        netname = contains(keys(node.interface_networks), io.logicallabel) ? (
           var.management_network != null && node.interface_networks[io.logicallabel].netname == var.management_network.name
-            ? zedcloud_network.management[0].name
-            : data.zedcloud_network.interface_net[node.interface_networks[io.logicallabel].netname].name
+          ? zedcloud_network.management[0].name
+          : data.zedcloud_network.interface_net[node.interface_networks[io.logicallabel].netname].name
         ) : data.zedcloud_network.enterprise.name
-        ipaddr     = contains(keys(node.interface_networks), io.logicallabel) ? node.interface_networks[io.logicallabel].ipaddr : ""
-        ztype      = io.ztype
-        tags       = {}
+        ipaddr   = contains(keys(node.interface_networks), io.logicallabel) ? node.interface_networks[io.logicallabel].ipaddr : ""
+        net_dhcp = contains(keys(node.interface_networks), io.logicallabel) && node.interface_networks[io.logicallabel].ipaddr != "" ? "NETWORK_DHCP_TYPE_STATIC" : "NETWORK_DHCP_TYPE_CLIENT"
+        ztype    = io.ztype
+        tags   = {}
       }
     ]
   }

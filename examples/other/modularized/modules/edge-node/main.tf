@@ -40,6 +40,7 @@ resource "zedcloud_edgenode" "this" {
       cost       = interfaces.value.cost
       netname    = interfaces.value.netname
       ipaddr     = interfaces.value.ipaddr
+      net_dhcp   = interfaces.value.net_dhcp
       ztype      = interfaces.value.ztype
       tags       = interfaces.value.tags
     }
