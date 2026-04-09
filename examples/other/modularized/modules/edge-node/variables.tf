@@ -57,6 +57,7 @@ variable "interfaces" {
     cost       = number
     netname    = string
     ipaddr     = optional(string, "")
+    net_dhcp   = optional(string, "NETWORK_DHCP_TYPE_CLIENT")
     ztype      = string
     tags       = optional(map(string), {})
   }))
