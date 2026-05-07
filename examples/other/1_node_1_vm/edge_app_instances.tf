@@ -26,11 +26,11 @@ resource "zedcloud_network_instance" "NET_INSTANCES_APP_NAT" {
   }
 }
 
-resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_ETH1" {
   for_each = local.nodes
 
-  name      = "ni_switch_first_${each.value.name}_${var.config_suffix}"
-  title     = "TF auto-created network-instance first switch (port = eth1) for ${each.value.name}"
+  name      = "ni_switch_eth1_${each.value.name}_${var.config_suffix}"
+  title     = "TF auto-created instance switch (port = eth1) for ${each.value.name}"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = each.value.id
@@ -38,11 +38,11 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
   port = "eth1"
 }
 
-resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_SECOND" {
+resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_ETH2" {
   for_each = local.nodes
 
-  name      = "ni_switch_second_${each.value.name}_${var.config_suffix}"
-  title     = "TF auto-created network-instance second switch (port = eth2) for ${each.value.name}"
+  name      = "ni_switch_eth2_${each.value.name}_${var.config_suffix}"
+  title     = "TF auto-created instance switch (port = eth2) for ${each.value.name}"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = each.value.id
@@ -132,7 +132,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   }
 
   vminfo {
-    cpus = 2
+    cpus = 6
     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
     vnc  = true
   }
@@ -159,25 +159,14 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[1].name
     intforder   = 2
     privateip   = false
-    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_FIRST[each.key].name
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_ETH1[each.key].name
   }
 
   interfaces {
     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[2].name
     intforder   = 3
     privateip   = false
-    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_SECOND[each.key].name
-  }
-
-  interfaces {
-    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[3].name
-    intforder   = 4
-    privateip   = false
-    netinstname = ""
-    io {
-      name = "eth3vf3"
-      type = "IO_TYPE_ETH_VF"
-    }
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_ETH2[each.key].name
   }
 }
 

@@ -214,8 +214,8 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 	}
 
 	qemuArgs = append(qemuArgs,
-	        // caching-mode=on is theoretically needed for using SR-IOV inside the VM, however with EVE-OS SR-IOV doesn't work.
-		"-device", "intel-iommu,intremap=on,caching-mode=on",
+		// caching-mode=on is theoretically needed for using SR-IOV inside the VM, however with EVE-OS SR-IOV doesn't work.
+		"-device", "intel-iommu,intremap=on,caching-mode=on,device-iotlb=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", conf.SerialNo),
 	)
 

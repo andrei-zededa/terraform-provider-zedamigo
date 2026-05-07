@@ -1,20 +1,10 @@
 terraform {
   required_providers {
-    zedamigo = {
-      source  = "localhost/andrei-zededa/zedamigo"
-      version = ">= 0.9.9"
-    }
-
     zedcloud = {
       source  = "zededa/zedcloud"
-      version = "2.7.0-RC2"
+      version = "2.7.0-RC"
     }
   }
-}
-
-provider "zedamigo" {
-  # target = ""
-  use_sudo = true
 }
 
 variable "ZEDEDA_CLOUD_URL" {

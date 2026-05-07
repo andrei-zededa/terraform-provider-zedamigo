@@ -5,7 +5,7 @@ resource "random_password" "vm_password" {
 
 locals {
   nodes = {
-    "ENODE_TEST_AAAA" = zedcloud_edgenode.ENODE_TEST_AAAA
+    "SUPERMICRO_BLACK_TOWER" = zedcloud_edgenode.SUPERMICRO_BLACK_TOWER
   }
 }
 
@@ -30,24 +30,24 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
   for_each = local.nodes
 
   name      = "ni_switch_first_${each.value.name}_${var.config_suffix}"
-  title     = "TF auto-created network-instance first switch (port = eth1) for ${each.value.name}"
+  title     = "TF auto-created network-instance first switch (port = eth0) for ${each.value.name}"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = each.value.id
 
-  port = "eth1"
+  port = "eth0"
 }
 
 resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_SECOND" {
   for_each = local.nodes
 
   name      = "ni_switch_second_${each.value.name}_${var.config_suffix}"
-  title     = "TF auto-created network-instance second switch (port = eth2) for ${each.value.name}"
+  title     = "TF auto-created network-instance second switch (port = eth1) for ${each.value.name}"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   device_id = each.value.id
 
-  port = "eth2"
+  port = "eth1"
 }
 
 locals {
@@ -132,7 +132,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   }
 
   vminfo {
-    cpus = 2
+    cpus = 6
     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
     vnc  = true
   }
@@ -167,17 +167,6 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     intforder   = 3
     privateip   = false
     netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_SECOND[each.key].name
-  }
-
-  interfaces {
-    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[3].name
-    intforder   = 4
-    privateip   = false
-    netinstname = ""
-    io {
-      name = "eth3vf3"
-      type = "IO_TYPE_ETH_VF"
-    }
   }
 }
 

@@ -7,7 +7,7 @@ terraform {
 
     zedcloud = {
       source  = "zededa/zedcloud"
-      version = "2.7.0-RC2"
+      version = "2.7.0-RC"
     }
   }
 }

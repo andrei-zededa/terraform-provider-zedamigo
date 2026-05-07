@@ -8,3 +8,4 @@ terraform-provider-zedamigo*
 **/.envrc
 **/terraform.tfvars
 **/terraform.tfvars.json
+misc/

@@ -11,7 +11,7 @@ resource "zedcloud_model" "QEMU_VM" {
   brand_id    = zedcloud_brand.QEMU.id
   attr = {
     "Cpus"    = "4"
-    "memory"  = "6144M"
+    "memory"  = "4096M"
     "storage" = "100G"
   }
   product_status = "production"
@@ -24,8 +24,7 @@ resource "zedcloud_model" "QEMU_VM" {
     cost         = 0
     logicallabel = "eth0"
     phyaddrs = {
-      Ifname  = "eth0"
-      PciLong = "0000:00:02.0"
+      Ifname = "eth0"
     }
     phylabel     = "eth0"
     usage        = "ADAPTER_USAGE_MANAGEMENT"
@@ -39,11 +38,10 @@ resource "zedcloud_model" "QEMU_VM" {
     cost         = 0
     logicallabel = "eth1"
     phyaddrs = {
-      Ifname  = "eth1"
-      PciLong = "0000:00:03.0"
+      Ifname = "eth1"
     }
     phylabel     = "eth1"
-    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage        = "ADAPTER_USAGE_MANAGEMENT"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -54,11 +52,10 @@ resource "zedcloud_model" "QEMU_VM" {
     cost         = 0
     logicallabel = "eth2"
     phyaddrs = {
-      Ifname  = "eth2"
-      PciLong = "0000:00:04.0"
+      Ifname = "eth2"
     }
     phylabel     = "eth2"
-    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage        = "ADAPTER_USAGE_MANAGEMENT"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -69,15 +66,11 @@ resource "zedcloud_model" "QEMU_VM" {
     cost         = 0
     logicallabel = "eth3"
     phyaddrs = {
-      Ifname  = "eth3"
-      PciLong = "0000:02:00.0"
+      Ifname = "eth3"
     }
     phylabel     = "eth3"
-    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage        = "ADAPTER_USAGE_MANAGEMENT"
     usage_policy = {}
-    ztype        = "IO_TYPE_ETH_PF"
-    vfs {
-      count = 4
-    }
+    ztype        = "IO_TYPE_ETH"
   }
 }

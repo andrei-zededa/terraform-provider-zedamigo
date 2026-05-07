@@ -1,18 +1,18 @@
-resource "zedcloud_brand" "QEMU" {
-  name        = "QEMU_TEST_${var.config_suffix}"
-  title       = "QEMU"
+resource "zedcloud_brand" "SUPERMICRO" {
+  name        = "SUPERMICRO_${var.config_suffix}"
+  title       = "SUPERMICRO"
   origin_type = "ORIGIN_LOCAL"
 }
 
-resource "zedcloud_model" "QEMU_VM" {
-  name        = "QEMU_VM_TEST_${var.config_suffix}"
-  title       = "QEMU_VM_WITH_ETH3_SRIOV"
+resource "zedcloud_model" "SUPERMICRO_BLACK_TOWER" {
+  name        = "SUPERMICRO_BLACK_TOWER_${var.config_suffix}"
+  title       = "SUPERMICRO_BLACK_TOWER"
   origin_type = "ORIGIN_LOCAL"
-  brand_id    = zedcloud_brand.QEMU.id
+  brand_id    = zedcloud_brand.SUPERMICRO.id
   attr = {
-    "Cpus"    = "4"
-    "memory"  = "6144M"
-    "storage" = "100G"
+    "Cpus"    = "12"
+    "memory"  = "65536M"
+    "storage" = "500G"
   }
   product_status = "production"
   state          = "SYS_MODEL_STATE_ACTIVE"
@@ -25,10 +25,10 @@ resource "zedcloud_model" "QEMU_VM" {
     logicallabel = "eth0"
     phyaddrs = {
       Ifname  = "eth0"
-      PciLong = "0000:00:02.0"
+      PciLong = "0000:03:00.0"
     }
     phylabel     = "eth0"
-    usage        = "ADAPTER_USAGE_MANAGEMENT"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -40,7 +40,7 @@ resource "zedcloud_model" "QEMU_VM" {
     logicallabel = "eth1"
     phyaddrs = {
       Ifname  = "eth1"
-      PciLong = "0000:00:03.0"
+      PciLong = "0000:03:00.1"
     }
     phylabel     = "eth1"
     usage        = "ADAPTER_USAGE_APP_SHARED"
@@ -55,10 +55,10 @@ resource "zedcloud_model" "QEMU_VM" {
     logicallabel = "eth2"
     phyaddrs = {
       Ifname  = "eth2"
-      PciLong = "0000:00:04.0"
+      PciLong = "0000:06:00.0"
     }
     phylabel     = "eth2"
-    usage        = "ADAPTER_USAGE_APP_SHARED"
+    usage        = "ADAPTER_USAGE_MANAGEMENT"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -70,14 +70,11 @@ resource "zedcloud_model" "QEMU_VM" {
     logicallabel = "eth3"
     phyaddrs = {
       Ifname  = "eth3"
-      PciLong = "0000:02:00.0"
+      PciLong = "0000:06:00.1"
     }
     phylabel     = "eth3"
     usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
-    ztype        = "IO_TYPE_ETH_PF"
-    vfs {
-      count = 4
-    }
+    ztype        = "IO_TYPE_ETH"
   }
 }

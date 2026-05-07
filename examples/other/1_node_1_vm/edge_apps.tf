@@ -48,7 +48,7 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
   name  = "ubuntu_test_vm_${var.config_suffix}"
   title = "ubuntu_test_vm_${var.config_suffix}"
 
-  networks    = 4
+  networks    = 3
   origin_type = "ORIGIN_LOCAL"
 
   manifest {
@@ -180,21 +180,6 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       name         = "app_eth2"
       optional     = false
       privateip    = false
-
-      acls {
-        matches {
-          type  = "ip"
-          value = "0.0.0.0/0"
-        }
-      }
-    }
-
-    interfaces {
-      directattach = true
-      name         = "app_eth3_vf"
-      optional     = false
-      privateip    = false
-      type         = "IO_TYPE_ETH_VF"
 
       acls {
         matches {
