@@ -199,7 +199,10 @@ resource "zedcloud_edgenode" "ENODE_003" {
     tags       = {}
   }
 
-  tags = {}
+  tags = {
+    # For 2-node ENC configs.
+    # tie-breaker = true
+  }
 }
 
 
@@ -214,7 +217,7 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
   name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.12.0-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "16.14.0-k-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -287,7 +290,8 @@ resource "zedamigo_installed_edge_node" "ENODE_003" {
 resource "zedamigo_edge_node" "ENODE_001" {
   name = "ENODE_001_${var.config_suffix}"
   cpus = 6
-  mem  = "12G"
+  cpu_pins = [14, 15, 4, 6, 10, 12]
+  mem  = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_001.serial_no
   serial_port_server = true
@@ -296,16 +300,17 @@ resource "zedamigo_edge_node" "ENODE_001" {
 
   extra_qemu_args = [
     # Plain virtio NIC mode.
-    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_1.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_1.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_1.name},script=no,downscript=no,model=virtio",
+    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_1.name},script=no,downscript=no,model=virtio,mac=1E:94:C2:3F:A:01",
+    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_1.name},script=no,downscript=no,model=virtio,mac=1E:94:C2:3F:B:01",
+    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_1.name},script=no,downscript=no,model=virtio,mac=1E:94:C2:3F:C:01",
   ]
 }
 
 resource "zedamigo_edge_node" "ENODE_002" {
   name = "ENODE_002_${var.config_suffix}"
   cpus = 6
-  mem  = "12G"
+  cpu_pins = [2, 3, 4, 5, 6, 7]
+  mem  = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_002.serial_no
   serial_port_server = true
@@ -314,16 +319,17 @@ resource "zedamigo_edge_node" "ENODE_002" {
 
   extra_qemu_args = [
     # Plain virtio NIC mode.
-    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_2.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_2.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_2.name},script=no,downscript=no,model=virtio",
+    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_2.name},script=no,downscript=no,model=virtio,mac=1E:84:C2:3F:A:02",
+    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_2.name},script=no,downscript=no,model=virtio,mac=1E:84:C2:3F:B:02",
+    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_2.name},script=no,downscript=no,model=virtio,mac=1E:84:C2:3F:C:02",
   ]
 }
 
 resource "zedamigo_edge_node" "ENODE_003" {
   name = "ENODE_003_${var.config_suffix}"
   cpus = 6
-  mem  = "12G"
+  cpu_pins = [8, 9, 10, 11, 12, 13]
+  mem  = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_003.serial_no
   serial_port_server = true
@@ -332,8 +338,29 @@ resource "zedamigo_edge_node" "ENODE_003" {
 
   extra_qemu_args = [
     # Plain virtio NIC mode.
-    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_3.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_3.name},script=no,downscript=no,model=virtio",
-    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_3.name},script=no,downscript=no,model=virtio",
+    "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_3.name},script=no,downscript=no,model=virtio,mac=1E:97:C2:3F:A:03",
+    "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_3.name},script=no,downscript=no,model=virtio,mac=1E:97:C2:3F:B:03",
+    "-nic", "tap,id=vmnet3,ifname=${zedamigo_tap.TAP_C_3.name},script=no,downscript=no,model=virtio,mac=1E:97:C2:3F:C:03",
   ]
+}
+
+resource "zedcloud_edgenode_cluster" "TEST_CLUSTER" {
+  name = "TEST_CLUSTER_${var.config_suffix}"
+  title = "TEST_CLUSTER_${var.config_suffix}"
+  project_id     = zedcloud_project.PROJECT.id
+
+  nodes {
+    id = zedcloud_edgenode.ENODE_001.id
+    cluster_interface = "eth1"
+  }
+
+  nodes {
+    id = zedcloud_edgenode.ENODE_002.id
+    cluster_interface = "eth1"
+  }
+
+  nodes {
+    id = zedcloud_edgenode.ENODE_003.id
+    cluster_interface = "eth1"
+  }
 }
