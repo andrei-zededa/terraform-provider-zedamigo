@@ -145,6 +145,42 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
 
 ## Setup on Ubuntu 24.04
 
+### Check that nested virtualization is available and enabled
+
+*zedamigo* needs KVM with nested virtualization enabled on the host so that
+EVE-OS (running inside the VM) can in turn start its own VMs for edge-app-instances.
+
+```shell
+# 1. Check that the CPU supports hardware virtualization (vmx for Intel, svm for AMD).
+#    If this returns 0 the CPU does not support virtualization (or it is disabled
+#    in the BIOS/UEFI - look for options like "Intel VT-x", "AMD-V", "SVM").
+❯ egrep -c '(vmx|svm)' /proc/cpuinfo
+16
+
+# 2. Check that the kvm and kvm_intel (or kvm_amd) kernel modules are loaded.
+❯ lsmod | grep kvm
+kvm_intel             450560  0
+kvm                  1404928  1 kvm_intel
+
+# 3. Check that nested virtualization is enabled for the KVM module.
+#    'Y' (or '1') means nested virtualization is enabled, 'N' (or '0') means it is not.
+❯ cat /sys/module/kvm_intel/parameters/nested   # Intel CPUs
+Y
+❯ cat /sys/module/kvm_amd/parameters/nested     # AMD CPUs
+1
+
+# If nested is disabled, enable it persistently and reload the module:
+❯ echo "options kvm_intel nested=1" | sudo tee /etc/modprobe.d/kvm-nested.conf
+❯ sudo modprobe -r kvm_intel && sudo modprobe kvm_intel
+# (replace kvm_intel with kvm_amd on AMD CPUs)
+
+# 4. Optionally use the kvm-ok helper from the cpu-checker package for a quick summary.
+❯ sudo apt -y install cpu-checker
+❯ sudo kvm-ok
+INFO: /dev/kvm exists
+KVM acceleration can be used
+```
+
 ### Install QEMU
 
 ```shell
