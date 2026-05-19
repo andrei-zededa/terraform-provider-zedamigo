@@ -8,13 +8,13 @@ resource "zedcloud_network_instance" "NET_INSTANCES_APP_NAT" {
   title     = "TF auto-created instance of ni_local_nat"
   kind      = "NETWORK_INSTANCE_KIND_LOCAL"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_V4"
-  cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  #### Seems like this is not needed and actually produces a 409 error.
+  #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
 
   port           = "uplink"
-  device_default = true
 
   tags = {
     ni_local_nat = "true"
@@ -26,11 +26,13 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
   title     = "TF auto-created instance of first switch"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
-  cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  #### Seems like this is not needed and actually produces a 409 error.
+  #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
 
+  # Probably it's better to match on a logical label.
   port = "eth2"
 }
 
@@ -39,11 +41,13 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_2ND" {
   title     = "TF auto-created instance of 2nd switch"
   kind      = "NETWORK_INSTANCE_KIND_SWITCH"
   type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
-  cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  #### Seems like this is not needed and actually produces a 409 error.
+  #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
 
+  # Probably it's better to match on a logical label.
   port = "eth3"
 }
 
@@ -80,7 +84,7 @@ locals {
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   name      = "ubuntu_test_${var.config_suffix}"
   title     = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name}"
-  cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  # cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
