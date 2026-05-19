@@ -36,6 +36,7 @@ resource "zedamigo_bridge" "br1000" {
 - `ipv6_address` (String) IPv6 address for the bridge
 - `mac_address` (String) MAC address for the bridge
 - `mtu` (Number) MTU size for the bridge
+- `netns` (String) Network namespace in which to create the bridge
 - `state` (String) State of the bridge (up/down)
 
 ### Read-Only

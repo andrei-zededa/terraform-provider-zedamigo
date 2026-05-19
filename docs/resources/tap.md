@@ -49,9 +49,11 @@ resource "zedamigo_tap" "tap2000" {
 - `ipv4_address` (String) IPv4 address to configure on the TAP interface
 - `master` (String) Bridge interface to attach this TAP interface to
 - `mtu` (Number) MTU size for the TAP interface
+- `netns` (String) Network namespace to move this TAP interface into after QEMU opens it
 - `owner` (String) Owner of the TAP interface
 - `state` (String) State of the TAP interface (up/down)
 
 ### Read-Only
 
 - `id` (String) TAP identifier
+- `mover_status` (String) Status of the TAP mover daemon: pending, moved, error, or empty

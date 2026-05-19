@@ -214,7 +214,8 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 	}
 
 	qemuArgs = append(qemuArgs,
-		"-device", "intel-iommu,intremap=on",
+		// caching-mode=on is theoretically needed for using SR-IOV inside the VM, however with EVE-OS SR-IOV doesn't work.
+		"-device", "intel-iommu,intremap=on,caching-mode=on,device-iotlb=on",
 		"-smbios", fmt.Sprintf("type=1,serial=%s,manufacturer=Dell Inc.,product=ProLiant 100 with 2 disks", conf.SerialNo),
 	)
 
@@ -342,30 +343,50 @@ set -eu;
 		}
 	}
 
-	// CPU pinning (non-installation only).
-	if !conf.IsInstallation && len(conf.CPUPins) > 0 {
-		cpus := int64(4)
-		if conf.CPUs > 0 {
-			cpus = conf.CPUs
-		}
-		if err := h.applyCPUPins(ctx, d, conf.CPUPins, int(cpus)); err != nil {
-			tflog.Warn(ctx, "CPU pinning failed", map[string]any{"error": err})
-		}
-	}
-
 	return nil
 }
 
+func (h *QEMUHypervisor) ApplyCPUPins(ctx context.Context, conf VMConfig) error {
+	if conf.IsInstallation || len(conf.CPUPins) == 0 {
+		return nil
+	}
+	cpus := int64(4)
+	if conf.CPUs > 0 {
+		cpus = conf.CPUs
+	}
+	return h.applyCPUPins(ctx, conf.ResourceDir, conf.CPUPins, int(cpus))
+}
+
+const (
+	cpuPinPIDPollInterval = 200 * time.Millisecond
+	cpuPinPIDPollTimeout  = 5 * time.Second
+)
+
 func (h *QEMUHypervisor) applyCPUPins(ctx context.Context, resourceDir string, cpuPins []int64, numCPUs int) error {
-	pidBytes, err := os.ReadFile(filepath.Join(resourceDir, "qemu.pid"))
-	if err != nil {
-		return fmt.Errorf("could not read QEMU PID file: %w", err)
+	pidFile := filepath.Join(resourceDir, "qemu.pid")
+
+	// Poll for the PID file — QEMU writes it asynchronously after launch.
+	var pidBytes []byte
+	deadline := time.Now().Add(cpuPinPIDPollTimeout)
+	for {
+		var err error
+		pidBytes, err = os.ReadFile(pidFile)
+		if err == nil && len(strings.TrimSpace(string(pidBytes))) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("QEMU PID file %s did not appear within %s: %w", pidFile, cpuPinPIDPollTimeout, err)
+			}
+			return fmt.Errorf("QEMU PID file %s was empty after %s", pidFile, cpuPinPIDPollTimeout)
+		}
+		time.Sleep(cpuPinPIDPollInterval)
 	}
 
 	pidStr := strings.TrimSpace(string(pidBytes))
 	qemuPID := 0
 	if _, err := fmt.Sscanf(pidStr, "%d", &qemuPID); err != nil {
-		return fmt.Errorf("invalid QEMU PID: %w", err)
+		return fmt.Errorf("invalid QEMU PID %q: %w", pidStr, err)
 	}
 
 	return pinCPUThreads(ctx, h, qemuPID, cpuPins, numCPUs, resourceDir)

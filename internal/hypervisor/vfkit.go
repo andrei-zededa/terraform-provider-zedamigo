@@ -400,6 +400,10 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	return nil
 }
 
+func (h *VFKitHypervisor) ApplyCPUPins(_ context.Context, _ VMConfig) error {
+	return nil
+}
+
 func (h *VFKitHypervisor) Status(ctx context.Context, resourceDir string) (bool, error) {
 	pidFile := filepath.Join(resourceDir, "vfkit.pid")
 	pidBytes, err := os.ReadFile(pidFile)

@@ -379,6 +379,17 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 				fmt.Sprintf("cpu_pins length (%d) must match cpus (%d)", len(cpuPins), cpus))
 			return
 		}
+
+		// Validate that taskset is available on Linux when cpu_pins is configured.
+		if runtime.GOOS == "linux" {
+			qh, ok := r.providerConf.Hypervisor.(*hypervisor.QEMUHypervisor)
+			if ok && qh.TasksetPath == "" {
+				resp.Diagnostics.AddError("Missing taskset binary",
+					"cpu_pins is configured but the 'taskset' command was not found on PATH. "+
+						"Install the util-linux package (e.g. 'apt install util-linux' or 'dnf install util-linux').")
+				return
+			}
+		}
 	}
 
 	if runtime.GOOS == "darwin" && data.SerialType.ValueString() == "serial" {
@@ -481,6 +492,12 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 			resp.Diagnostics.Append(res.Diagnostics()...)
 			return
 		}
+	}
+
+	if err := r.providerConf.Hypervisor.ApplyCPUPins(ctx, vmConf); err != nil {
+		resp.Diagnostics.AddError("Edge Node Resource Error",
+			fmt.Sprintf("Failed to apply CPU pinning: %v", err))
+		return
 	}
 
 	x, err := r.providerConf.Hypervisor.Status(ctx, d)

@@ -72,6 +72,9 @@ var (
 	gvproxyListenVfkit = flag.String("gp.listen-vfkit", "", "gvproxy: vfkit unixgram socket URI (e.g. unixgram:///path/to/sock)")
 	gvproxyListenQemu  = flag.String("gp.listen-qemu", "", "gvproxy: QEMU unix socket URI (e.g. unix:///path/to/sock)")
 	gvproxyForwards    = flag.String("gp.forwards", "", "gvproxy: comma-separated forwards (hostAddr:port/guestAddr:port,...)")
+
+	tapMover       = flag.Bool("tap-mover", false, "Run the binary in 'TAP mover' mode")
+	tapMoverConfig = flag.String("tm.config", "", "TAP mover: config file path")
 )
 
 func main() {
@@ -166,6 +169,20 @@ func main() {
 	if *gvproxyMode {
 		// Run in "gvproxy" mode (embedded user-space networking).
 		gvproxyMain()
+		os.Exit(0)
+	}
+
+	if *tapMover {
+		// Run in "TAP mover" mode and NOT the normal terraform provider mode.
+
+		// Validate CLI flags.
+		if *tapMoverConfig == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'TAP mover' mode MUST specify `-tm.config`.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		tapMoverMain()
 		os.Exit(0)
 	}
 

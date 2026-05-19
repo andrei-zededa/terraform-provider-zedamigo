@@ -19,6 +19,7 @@ require (
 	github.com/mdlayher/ndp v1.1.0
 	github.com/shirou/gopsutil/v4 v4.25.12
 	github.com/sirupsen/logrus v1.9.4
+	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -122,6 +123,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
