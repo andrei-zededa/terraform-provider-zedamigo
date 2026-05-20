@@ -266,6 +266,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewRADV,
 		NewLocalDatastore,
 		NewNetNS,
+		NewInternetMonitor,
 	}
 }
 

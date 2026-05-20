@@ -75,6 +75,10 @@ var (
 
 	tapMover       = flag.Bool("tap-mover", false, "Run the binary in 'TAP mover' mode")
 	tapMoverConfig = flag.String("tm.config", "", "TAP mover: config file path")
+
+	internetMonitor = flag.Bool("internet-monitor", false, "Run the binary in 'internet monitor' mode")
+	// Internet monitor mode CLI flags.
+	imConfig = flag.String("im.config", "", "Internet monitor: config file path")
 )
 
 func main() {
@@ -183,6 +187,20 @@ func main() {
 		}
 
 		tapMoverMain()
+		os.Exit(0)
+	}
+
+	if *internetMonitor {
+		// Run in "internet monitor" mode and NOT the normal terraform provider mode.
+
+		// Validate CLI flags.
+		if *imConfig == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'internet monitor' mode MUST specify `-im.config`.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		internetMonitorMain()
 		os.Exit(0)
 	}
 

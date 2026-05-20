@@ -1,10 +1,11 @@
 module github.com/andrei-zededa/terraform-provider-zedamigo
 
-go 1.24.2
+go 1.25.1
 
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrei-zededa/hello-zedcloud v0.8.3
+	github.com/andrei-zededa/monitor-system-usage v0.1.0
 	github.com/containers/gvisor-tap-vsock v0.8.8
 	github.com/coredhcp/coredhcp v0.0.0-20250806070228-f7e98e4e350b
 	github.com/crc-org/vfkit v0.6.3
@@ -17,6 +18,8 @@ require (
 	github.com/hashicorp/terraform-plugin-testing v1.12.0
 	github.com/matryer/is v1.4.1
 	github.com/mdlayher/ndp v1.1.0
+	github.com/miekg/dns v1.1.72
+	github.com/prometheus-community/pro-bing v0.8.0
 	github.com/shirou/gopsutil/v4 v4.25.12
 	github.com/sirupsen/logrus v1.9.4
 	github.com/vishvananda/netlink v1.3.1
@@ -48,6 +51,7 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
@@ -95,7 +99,6 @@ require (
 	github.com/mdlayher/socket v0.4.1 // indirect
 	github.com/mdlayher/vsock v1.2.1 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
-	github.com/miekg/dns v1.1.72 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.0 // indirect
@@ -127,6 +130,7 @@ require (
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/goldmark v1.7.7 // indirect
 	github.com/yuin/goldmark-meta v1.1.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
