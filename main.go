@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/andrei-zededa/monitor-system-usage/pkg/msucollect"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/provider"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/socket"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -79,6 +80,11 @@ var (
 	internetMonitor = flag.Bool("internet-monitor", false, "Run the binary in 'internet monitor' mode")
 	// Internet monitor mode CLI flags.
 	imConfig = flag.String("im.config", "", "Internet monitor: config file path")
+
+	monitorSystemUsage = flag.Bool("monitor-system-usage", false, "Run the binary in 'monitor system usage' mode")
+	// Monitor system usage mode CLI flags.
+	msuConfig = flag.String("msu.config", "", "Monitor system usage: config file path")
+	msuDump   = flag.String("msu.dump", "", "Monitor system usage: dump CBOR file to text on stdout, then exit")
 )
 
 func main() {
@@ -201,6 +207,28 @@ func main() {
 		}
 
 		internetMonitorMain()
+		os.Exit(0)
+	}
+
+	if *monitorSystemUsage {
+		// Run in "monitor system usage" mode and NOT the normal terraform provider mode.
+
+		if *msuDump != "" {
+			if err := msucollect.Dump(*msuDump, os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+
+		// Validate CLI flags.
+		if *msuConfig == "" {
+			fmt.Fprintf(os.Stderr, "Error: In 'monitor system usage' mode MUST specify either `-msu.config` or `-msu.dump`.\n")
+			flag.Usage()
+			os.Exit(1)
+		}
+
+		monitorSystemUsageMain()
 		os.Exit(0)
 	}
 

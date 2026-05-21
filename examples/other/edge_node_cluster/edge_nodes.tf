@@ -53,7 +53,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
 
   interfaces {
     intfname   = "eth1"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -63,7 +63,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
 
   interfaces {
     intfname   = "eth2"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -73,7 +73,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
 
   interfaces {
     intfname   = "eth3"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -112,7 +112,7 @@ resource "zedcloud_edgenode" "ENODE_002" {
 
   interfaces {
     intfname   = "eth1"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -122,7 +122,7 @@ resource "zedcloud_edgenode" "ENODE_002" {
 
   interfaces {
     intfname   = "eth2"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -132,7 +132,7 @@ resource "zedcloud_edgenode" "ENODE_002" {
 
   interfaces {
     intfname   = "eth3"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -171,7 +171,7 @@ resource "zedcloud_edgenode" "ENODE_003" {
 
   interfaces {
     intfname   = "eth1"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -181,7 +181,7 @@ resource "zedcloud_edgenode" "ENODE_003" {
 
   interfaces {
     intfname   = "eth2"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -191,7 +191,7 @@ resource "zedcloud_edgenode" "ENODE_003" {
 
   interfaces {
     intfname   = "eth3"
-    intf_usage = "ADAPTER_USAGE_MANAGEMENT"
+    intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
@@ -288,10 +288,10 @@ resource "zedamigo_installed_edge_node" "ENODE_003" {
 #### `ssh_port` is the value. Also `serial_console_log` is all the output
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_001" {
-  name = "ENODE_001_${var.config_suffix}"
-  cpus = 6
+  name     = "ENODE_001_${var.config_suffix}"
+  cpus     = 6
   cpu_pins = [14, 15, 4, 6, 10, 12]
-  mem  = "16G"
+  mem      = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_001.serial_no
   serial_port_server = true
@@ -307,10 +307,10 @@ resource "zedamigo_edge_node" "ENODE_001" {
 }
 
 resource "zedamigo_edge_node" "ENODE_002" {
-  name = "ENODE_002_${var.config_suffix}"
-  cpus = 6
+  name     = "ENODE_002_${var.config_suffix}"
+  cpus     = 6
   cpu_pins = [2, 3, 4, 5, 6, 7]
-  mem  = "16G"
+  mem      = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_002.serial_no
   serial_port_server = true
@@ -326,10 +326,10 @@ resource "zedamigo_edge_node" "ENODE_002" {
 }
 
 resource "zedamigo_edge_node" "ENODE_003" {
-  name = "ENODE_003_${var.config_suffix}"
-  cpus = 6
+  name     = "ENODE_003_${var.config_suffix}"
+  cpus     = 6
   cpu_pins = [8, 9, 10, 11, 12, 13]
-  mem  = "16G"
+  mem      = "16G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_003.serial_no
   serial_port_server = true
@@ -344,23 +344,85 @@ resource "zedamigo_edge_node" "ENODE_003" {
   ]
 }
 
+# Polls each edge node over SSH and waits for EVE-OS to report that all kube
+# components are initialized (file /var/lib/all_components_initialized exists).
+# Without this barrier the cluster formation below races EVE-OS bringing up
+# its Kubernetes stack and fails or stalls.
+resource "null_resource" "WAIT_KUBE_READY" {
+  triggers = {
+    enode_001_id = zedamigo_edge_node.ENODE_001.id
+    enode_002_id = zedamigo_edge_node.ENODE_002.id
+    enode_003_id = zedamigo_edge_node.ENODE_003.id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -u
+      declare -A PORTS=(
+        [ENODE_001]=${zedamigo_edge_node.ENODE_001.ssh_port}
+        [ENODE_002]=${zedamigo_edge_node.ENODE_002.ssh_port}
+        [ENODE_003]=${zedamigo_edge_node.ENODE_003.ssh_port}
+      )
+
+      SSH_OPTS=(
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        -o ConnectTimeout=5
+        -o LogLevel=ERROR
+      )
+
+      DEADLINE=$(( $(date +%s) + 1800 ))
+      declare -A READY=()
+
+      while :; do
+        all_ready=1
+        for n in "$${!PORTS[@]}"; do
+          if [[ -n "$${READY[$n]:-}" ]]; then continue; fi
+          port="$${PORTS[$n]}"
+          if ssh "$${SSH_OPTS[@]}" -p "$port" root@localhost \
+              'eve exec kube ls -l /var/lib/all_components_initialized' \
+              >/dev/null 2>&1; then
+            echo "[$(date -Is)] $n (port $port) ready."
+            READY[$n]=1
+          else
+            all_ready=0
+            echo "[$(date -Is)] $n (port $port) not ready yet."
+          fi
+        done
+        if [[ "$all_ready" -eq 1 ]]; then
+          echo "All edge nodes report kube readiness."
+          exit 0
+        fi
+        if (( $(date +%s) >= DEADLINE )); then
+          echo "Timed out after 30 minutes waiting for kube readiness." >&2
+          exit 1
+        fi
+        sleep 15
+      done
+    EOT
+  }
+}
+
 resource "zedcloud_edgenode_cluster" "TEST_CLUSTER" {
-  name = "TEST_CLUSTER_${var.config_suffix}"
-  title = "TEST_CLUSTER_${var.config_suffix}"
-  project_id     = zedcloud_project.PROJECT.id
+  name       = "TEST_CLUSTER_${var.config_suffix}"
+  title      = "TEST_CLUSTER_${var.config_suffix}"
+  project_id = zedcloud_project.PROJECT.id
+
+  depends_on = [null_resource.WAIT_KUBE_READY]
 
   nodes {
-    id = zedcloud_edgenode.ENODE_001.id
+    id                = zedcloud_edgenode.ENODE_001.id
     cluster_interface = "eth1"
   }
 
   nodes {
-    id = zedcloud_edgenode.ENODE_002.id
+    id                = zedcloud_edgenode.ENODE_002.id
     cluster_interface = "eth1"
   }
 
   nodes {
-    id = zedcloud_edgenode.ENODE_003.id
+    id                = zedcloud_edgenode.ENODE_003.id
     cluster_interface = "eth1"
   }
 }

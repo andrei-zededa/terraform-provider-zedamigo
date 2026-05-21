@@ -41,7 +41,7 @@ resource "zedcloud_model" "QEMU_VM" {
       Ifname = "eth1"
     }
     phylabel     = "eth1"
-    usage        = "ADAPTER_USAGE_MANAGEMENT"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -55,7 +55,7 @@ resource "zedcloud_model" "QEMU_VM" {
       Ifname = "eth2"
     }
     phylabel     = "eth2"
-    usage        = "ADAPTER_USAGE_MANAGEMENT"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }
@@ -69,7 +69,7 @@ resource "zedcloud_model" "QEMU_VM" {
       Ifname = "eth3"
     }
     phylabel     = "eth3"
-    usage        = "ADAPTER_USAGE_MANAGEMENT"
+    usage        = "ADAPTER_USAGE_APP_SHARED"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
   }

@@ -4,17 +4,17 @@ resource "random_password" "vm_password" {
 }
 
 resource "zedcloud_network_instance" "NET_INSTANCES_APP_NAT" {
-  name      = "ni_local_nat_${var.config_suffix}"
-  title     = "TF auto-created instance of ni_local_nat"
-  kind      = "NETWORK_INSTANCE_KIND_LOCAL"
-  type      = "NETWORK_INSTANCE_DHCP_TYPE_V4"
+  name  = "ni_local_nat_${var.config_suffix}"
+  title = "TF auto-created instance of ni_local_nat"
+  kind  = "NETWORK_INSTANCE_KIND_LOCAL"
+  type  = "NETWORK_INSTANCE_DHCP_TYPE_V4"
   #### Seems like this is not needed and actually produces a 409 error.
   #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
 
-  port           = "uplink"
+  port = "uplink"
 
   tags = {
     ni_local_nat = "true"
@@ -22,10 +22,10 @@ resource "zedcloud_network_instance" "NET_INSTANCES_APP_NAT" {
 }
 
 resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
-  name      = "ni_switch_first_${var.config_suffix}"
-  title     = "TF auto-created instance of first switch"
-  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
-  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  name  = "ni_switch_first_${var.config_suffix}"
+  title = "TF auto-created instance of first switch"
+  kind  = "NETWORK_INSTANCE_KIND_SWITCH"
+  type  = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   #### Seems like this is not needed and actually produces a 409 error.
   #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
@@ -37,10 +37,10 @@ resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_FIRST" {
 }
 
 resource "zedcloud_network_instance" "NET_INSTANCES_SWITCH_2ND" {
-  name      = "ni_switch_2nd_${var.config_suffix}"
-  title     = "TF auto-created instance of 2nd switch"
-  kind      = "NETWORK_INSTANCE_KIND_SWITCH"
-  type      = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
+  name  = "ni_switch_2nd_${var.config_suffix}"
+  title = "TF auto-created instance of 2nd switch"
+  kind  = "NETWORK_INSTANCE_KIND_SWITCH"
+  type  = "NETWORK_INSTANCE_DHCP_TYPE_UNSPECIFIED"
   #### Seems like this is not needed and actually produces a 409 error.
   #### cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
@@ -82,14 +82,14 @@ locals {
 }
 
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
-  name      = "ubuntu_test_${var.config_suffix}"
-  title     = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name}"
+  name  = "ubuntu_test_${var.config_suffix}"
+  title = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name}"
   # cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   edge_node_cluster {
     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
   }
-  app_id    = zedcloud_application.UBUNTU_VM_DEF.id
-  app_type  = zedcloud_application.UBUNTU_VM_DEF.manifest[0].app_type
+  app_id   = zedcloud_application.UBUNTU_VM_DEF.id
+  app_type = zedcloud_application.UBUNTU_VM_DEF.manifest[0].app_type
 
   activate = true
 
