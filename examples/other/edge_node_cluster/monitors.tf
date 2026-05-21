@@ -25,5 +25,5 @@ resource "zedamigo_monitor_system_usage" "test" {
   flush_every_n = 6
   include_env   = "filtered"
 
-  namespaces = [zedamigo_netns.TEST_NS.B.name, zedamigo_netns.TEST_NS.C.name]
+  namespaces = [zedamigo_netns.TEST_NS_B.name, zedamigo_netns.TEST_NS_C.name]
 }
