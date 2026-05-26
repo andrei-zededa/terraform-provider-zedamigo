@@ -14,16 +14,16 @@ resource "zedamigo_internet_monitor" "test" {
   privileged_icmp = true
 }
 
-resource "zedamigo_monitor_system_usage" "test" {
-  depends_on = [
-    zedamigo_edge_node.ENODE_001,
-    zedamigo_edge_node.ENODE_002,
-    zedamigo_edge_node.ENODE_003
-  ]
-
-  interval      = "10s"
-  flush_every_n = 6
-  include_env   = "filtered"
-
-  namespaces = [zedamigo_netns.TEST_NS_B.name, zedamigo_netns.TEST_NS_C.name]
-}
+#### resource "zedamigo_monitor_system_usage" "test" {
+####   depends_on = [
+####     zedamigo_edge_node.ENODE_001,
+####     zedamigo_edge_node.ENODE_002,
+####     zedamigo_edge_node.ENODE_003
+####   ]
+####
+####   interval      = "10s"
+####   flush_every_n = 6
+####   include_env   = "filtered"
+####
+####   #### namespaces = [zedamigo_netns.TEST_NS_B.name, zedamigo_netns.TEST_NS_C.name]
+#### }

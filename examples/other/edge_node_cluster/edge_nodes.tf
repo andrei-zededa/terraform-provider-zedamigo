@@ -216,8 +216,8 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### This creates a custom EVE-OS installer ISO, it basically runs
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
-  name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.14.0-k-${lower(var.EDGE_NODE_ARCH)}"
+  name            = "EVE-K_${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "main-pr-5989-k-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF

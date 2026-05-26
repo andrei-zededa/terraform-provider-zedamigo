@@ -27,7 +27,7 @@ resource "zedamigo_tap" "TAP_A_1" {
 }
 
 resource "zedamigo_tap" "TAP_A_2" {
-  name   = "tapA0-${var.config_suffix}"
+  name   = "tapA-2-${var.config_suffix}"
   mtu    = "1500"
   state  = "up"
   group  = "kvm"
@@ -42,21 +42,14 @@ resource "zedamigo_tap" "TAP_A_3" {
   master = zedamigo_bridge.BRIDGE_A.name
 }
 
-resource "zedamigo_netns" "TEST_NS_B" {
-  name = "TEST_NS_B"
-}
-
 resource "zedamigo_bridge" "BRIDGE_B" {
   name         = "brB-${var.config_suffix}"
   mtu          = "1500"
   state        = "up"
   ipv4_address = "10.99.2.1/24"
-  netns        = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_dhcp_server" "DHCP_B" {
-  depends_on = [zedamigo_edge_node.ENODE_001] # Because the TAPs are only moved inside the NS after the QEMU process starts.
-
   interface  = zedamigo_bridge.BRIDGE_B.name
   server_id  = "10.99.2.1"
   nameserver = "9.9.9.9"
@@ -67,7 +60,6 @@ resource "zedamigo_dhcp_server" "DHCP_B" {
     end   = "10.99.2.69"
   }
   lease_time = 86400
-  netns      = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_tap" "TAP_B_1" {
@@ -76,7 +68,6 @@ resource "zedamigo_tap" "TAP_B_1" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_B.name
-  netns  = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_tap" "TAP_B_2" {
@@ -85,7 +76,6 @@ resource "zedamigo_tap" "TAP_B_2" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_B.name
-  netns  = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_tap" "TAP_B_3" {
@@ -94,24 +84,16 @@ resource "zedamigo_tap" "TAP_B_3" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_B.name
-  netns  = zedamigo_netns.TEST_NS_B.name
-}
-
-resource "zedamigo_netns" "TEST_NS_C" {
-  name = "TEST_NS_C"
 }
 
 resource "zedamigo_bridge" "BRIDGE_C" {
-  name         = "brB-${var.config_suffix}"
+  name         = "brC-${var.config_suffix}"
   mtu          = "1500"
   state        = "up"
   ipv4_address = "10.99.3.1/24"
-  netns        = zedamigo_netns.TEST_NS_C.name
 }
 
 resource "zedamigo_dhcp_server" "DHCP_C" {
-  depends_on = [zedamigo_edge_node.ENODE_001] # Because the TAPs are only moved inside the NS after the QEMU process starts.
-
   interface  = zedamigo_bridge.BRIDGE_C.name
   server_id  = "10.99.3.1"
   nameserver = "9.9.9.9"
@@ -122,7 +104,6 @@ resource "zedamigo_dhcp_server" "DHCP_C" {
     end   = "10.99.3.79"
   }
   lease_time = 86400
-  netns      = zedamigo_netns.TEST_NS_C.name
 }
 
 resource "zedamigo_tap" "TAP_C_1" {
@@ -131,7 +112,6 @@ resource "zedamigo_tap" "TAP_C_1" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_C.name
-  netns  = zedamigo_netns.TEST_NS_C.name
 }
 
 resource "zedamigo_tap" "TAP_C_2" {
@@ -140,7 +120,6 @@ resource "zedamigo_tap" "TAP_C_2" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_C.name
-  netns  = zedamigo_netns.TEST_NS_C.name
 }
 
 resource "zedamigo_tap" "TAP_C_3" {
@@ -149,5 +128,4 @@ resource "zedamigo_tap" "TAP_C_3" {
   state  = "up"
   group  = "kvm"
   master = zedamigo_bridge.BRIDGE_C.name
-  netns  = zedamigo_netns.TEST_NS_C.name
 }

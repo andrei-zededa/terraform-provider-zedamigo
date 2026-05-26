@@ -94,8 +94,8 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### This creates a custom EVE-OS installer ISO, it basically runs
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
-  name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.14.0-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  name            = "EVE-K_${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "main-pr-5989-k-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -149,9 +149,9 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name     = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus     = 2
-  cpu_pins = [16, 17]
-  mem      = "6G"
+  cpus     = 6 
+  cpu_pins = [10, 11, 12, 13, 14, 15]
+  mem      = "12G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true
@@ -163,4 +163,60 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
     "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_AAAA_1.name},script=no,downscript=no,model=virtio",
     "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_AAAA_2.name},script=no,downscript=no,model=virtio",
   ]
+}
+
+# Polls each edge node over SSH and waits for EVE-OS to report that all kube
+# components are initialized (file /var/lib/all_components_initialized exists).
+# Without this barrier the cluster formation below races EVE-OS bringing up
+# its Kubernetes stack and fails or stalls.
+resource "null_resource" "WAIT_KUBE_READY" {
+  triggers = {
+    enode_001_id = zedamigo_edge_node.ENODE_TEST_VM_AAAA.id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -u
+      declare -A PORTS=(
+        [ENODE_001]=${zedamigo_edge_node.ENODE_TEST_VM_AAAA.ssh_port}
+      )
+
+      SSH_OPTS=(
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        -o ConnectTimeout=5
+        -o LogLevel=ERROR
+      )
+
+      DEADLINE=$(( $(date +%s) + 1800 ))
+      declare -A READY=()
+
+      while :; do
+        all_ready=1
+        for n in "$${!PORTS[@]}"; do
+          if [[ -n "$${READY[$n]:-}" ]]; then continue; fi
+          port="$${PORTS[$n]}"
+          if ssh "$${SSH_OPTS[@]}" -p "$port" root@localhost \
+              'eve exec kube ls -l /var/lib/all_components_initialized' \
+              >/dev/null 2>&1; then
+            echo "[$(date -Is)] $n (port $port) ready."
+            READY[$n]=1
+          else
+            all_ready=0
+            echo "[$(date -Is)] $n (port $port) not ready yet."
+          fi
+        done
+        if [[ "$all_ready" -eq 1 ]]; then
+          echo "All edge nodes report kube readiness."
+          exit 0
+        fi
+        if (( $(date +%s) >= DEADLINE )); then
+          echo "Timed out after 30 minutes waiting for kube readiness." >&2
+          exit 1
+        fi
+        sleep 15
+      done
+    EOT
+  }
 }
