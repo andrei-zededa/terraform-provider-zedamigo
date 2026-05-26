@@ -1,0 +1,167 @@
+NOTE: These outputs were taken by running `examples/other/1_node_1_vm` and
+`examples/other/1_node_1_vm_eve_k` in parallel.
+
+● Step-by-step plumbing of the 3 VM interfaces
+
+  Common to both flavors (host-side bridges, same identity trick)
+
+  EVE renames each physical NIC and replaces it with a Linux bridge of the same name that carries the original MAC and the host's L3 address. The renamed
+  physical NIC becomes a slave of that bridge. There's also a per-port dummy ethN-m used as a MAC-parking placeholder.
+
+  ┌───────────────────────────┬───────────────────────────────────────────────────────────────────────────────────┬─────────────────────────────────────────┐
+  │          Object           │                                    EVE-K (bo9)                                    │              Classic (8gh)              │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Real NIC #0 → bridge      │ keth0 (50:54:00:12:34:56) slave of bridge eth0 (52:54:00:12:34:56, 10.0.2.15/24)  │ same                                    │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Real NIC #1 → bridge      │ keth1 (50:54:00:12:34:57) slave of bridge eth1 (52:54:00:12:34:57, 10.99.1.70/24) │ same                                    │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Real NIC #2 → bridge      │ keth2 (50:54:00:12:34:58) slave of bridge eth2 (52:54:00:12:34:58, 10.99.2.70/24) │ same                                    │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Local NAT bridge          │ bn3 10.3.0.1/16 (mac 00:16:3e:8c:2d:03)                                           │ bn2 10.1.0.1/16 (mac 00:16:3e:a8:f4:02) │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ MAC-parking dummies       │ eth1-m, eth2-m                                                                    │ eth1-m, eth2-m                          │
+  ├───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Host-side app-NIC handles │ nbu1x1@if57, nbu2x1@if59, nbu3x1@if61                                             │ nbu1x1, nbu2x1, nbu3x1                  │
+  └───────────────────────────┴───────────────────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────┘
+
+  So far so good — the EVE host abstractions for the uplink side are identical.
+
+  Where the flavors diverge — the host-side handle that faces the VM
+
+  $ ip -d link show nbu2x1   (master = bridge "eth1" in both cases)
+
+  - EVE-K: veth …  link-netns cni-a0824bf7-…  bridge_slave → one end of a veth pair whose peer lives inside the virt-launcher pod's network namespace.
+  - Classic: tun type tap pi off vnet_hdr on  bridge_slave → a Linux TAP that QEMU opens via /dev/net/tun and reads/writes packets directly.
+
+  That single line of ip -d link show is where you can tell the two flavors apart.
+
+  Inside the EVE-K virt-launcher pod netns (cni-a0824bf7-…)
+
+  Per VMI NIC, KubeVirt builds a 3-element stack:
+
+  pod6c270ef2f25  DOWN   06:99:10:1b:a8:14   <BROADCAST,NOARP>         ← dummy holding the IP CNI handed to the pod
+  6c270ef2f25-nic@if58  UP  96:a4:1f:24:e1:4e ─ slave of k6t-6c270ef2f25 ← the veth peer of host nbu1x1@if57
+  k6t-6c270ef2f25  UP  96:a4:1f:24:e1:4e                                ← KubeVirt-managed bridge
+  tap6c270ef2f25   UP  ea:9b:d7:ba:e4:72 ─ slave of k6t-6c270ef2f25     ← TAP for QEMU
+
+  Cross-checking the MAC against the VMI spec we got from kubectl get vmi -o json:
+
+  domain.spec.interfaces: net1 → 06:99:10:1b:a8:14   ✓ matches pod6c270ef2f25's address
+                          net2 → 02:16:3e:47:4a:b6   ✓ matches pod2daa9a9645f's address
+                          net3 → 02:16:3e:45:da:3e   ✓ matches pod3b20bf89a26's address
+  spec.networks:          all three → multus net-attach-def "network-instance-attachment"
+  net-attach-def spec:    { "cniVersion": "0.3.1", "type": "eve-bridge" }
+
+  So each VMI NIC is wired by EVE's custom eve-bridge CNI through Multus, and the VMI sees the MAC originally allocated by CNI to the pod side of that NIC.
+
+  End-to-end path for one packet (switch-mode NIC #2, going out over eth1)
+
+  EVE-K (bo9):
+
+  VMI nic "net2" (enp2s0, 02:16:3e:47:4a:b6, 10.99.1.71)
+    → QEMU vhost-net
+    → tap2daa9a9645f               (TAP, in pod netns)
+    → k6t-2daa9a9645f bridge       (KubeVirt-managed, in pod netns)
+    → 2daa9a9645f-nic@if60         (veth, slave of k6t bridge, in pod netns)
+    → nbu2x1@if59                  (veth peer, slave of bridge eth1, in host netns)
+    → bridge eth1                  (52:54:00:12:34:57, 10.99.1.70/24, host netns)
+    → keth1                        (physical NIC, slave of bridge eth1)
+    → out the wire
+
+  Classic (8gh):
+
+  VM nic "enp4s0" (02:16:3e:fc:48:72, 10.99.1.71)
+    → QEMU vhost-net
+    → nbu2x1                       (TAP, slave of bridge eth1, host netns)
+    → bridge eth1                  (52:54:00:12:34:57, 10.99.1.70/24)
+    → keth1                        (physical NIC, slave of bridge eth1)
+    → out the wire
+
+  EVE-K has 4 extra L2 hops inside the pod (tap → k6t-bridge → nic-veth → host-veth) for every packet to/from the VMI.
+
+  For the NAT-NIC (NI of kind NETWORK_INSTANCE_KIND_LOCAL)
+
+  Same plumbing chain except the host bridge is bn3 (EVE-K, 10.3.0.1/16) or bn2 (classic, 10.1.0.1/16), and outbound packets are SNAT-masqueraded onto the
+  uplink eth0. The VM-side IP is leased by EVE's dnsmasq running against that bridge.
+
+  SSH ↔ Zedcloud cross-check (IPs and MACs)
+
+  EVE-K standalone (bo9)
+
+  ┌────────────────┬──────────────────────────────────────────────┬────────────────────────────────────────────┬──────────────────────────────────────────┐
+  │     Object     │                What SSH shows                │           What Zedcloud reports            │                  Match                   │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ Node eth0      │ bridge eth0 10.0.2.15/24, mac                │ eth0 10.0.2.15, mac 52:54:00:12:34:56      │ ✓                                        │
+  │ (mgmt)         │ 52:54:00:12:34:56                            │                                            │                                          │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ Node eth1      │ bridge eth1 10.99.1.70/24, mac               │ eth1 10.99.1.70, mac 52:54:00:12:34:57     │ ✓                                        │
+  │                │ 52:54:00:12:34:57                            │                                            │                                          │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ Node eth2      │ bridge eth2 10.99.2.70/24, mac               │ eth2 10.99.2.70, mac 52:54:00:12:34:58     │ ✓                                        │
+  │                │ 52:54:00:12:34:58                            │                                            │                                          │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ VM NIC 1 (NAT) │ enp1s0 10.3.0.128/16, mac 06:99:10:1b:a8:14, │ app_eth0 10.3.0.128, mac                   │ ✓                                        │
+  │                │  gw 10.3.0.1                                 │ 06:99:10:1b:a8:14, gw 10.3.0.1             │                                          │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ VM NIC 2 (sw   │ enp2s0 10.99.1.71/24, mac 02:16:3e:47:4a:b6, │ app_eth1 10.99.1.71, mac                   │ ✓ IP/MAC; gw learned only inside the VM  │
+  │ eth1)          │  gw 10.99.1.1                                │ 02:16:3e:47:4a:b6, gw <nil>                │ (switch NI is L2)                        │
+  ├────────────────┼──────────────────────────────────────────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ VM NIC 3 (sw   │ enp3s0 10.99.2.71/24, mac 02:16:3e:45:da:3e, │ app_eth2 10.99.2.71, mac                   │ ✓ same                                   │
+  │ eth2)          │  gw 10.99.2.1                                │ 02:16:3e:45:da:3e, gw <nil>                │                                          │
+  └────────────────┴──────────────────────────────────────────────┴────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+  adminState=ADMIN_STATE_ACTIVE, runState=RUN_STATE_ONLINE on both the node and the app.
+
+  Classic EVE (8gh) — from the first session, re-verified now
+
+  ┌────────────────────┬───────────────────────────────────────────────────────────┬────────────────────────────────────────────┬───────┐
+  │       Object       │                            SSH                            │                  Zedcloud                  │ Match │
+  ├────────────────────┼───────────────────────────────────────────────────────────┼────────────────────────────────────────────┼───────┤
+  │ Node eth0/1/2      │ 10.0.2.15 / 10.99.1.70 / 10.99.2.70 (on bridges eth0/1/2) │ same                                       │ ✓     │
+  ├────────────────────┼───────────────────────────────────────────────────────────┼────────────────────────────────────────────┼───────┤
+  │ VM NIC 1 (NAT bn2) │ enp3s0 10.1.0.128/16, mac c6:b4:a1:e0:4d:ae               │ app_eth0 10.1.0.128, same mac, gw 10.1.0.1 │ ✓     │
+  ├────────────────────┼───────────────────────────────────────────────────────────┼────────────────────────────────────────────┼───────┤
+  │ VM NIC 2 (sw eth1) │ enp4s0 10.99.1.71/24, mac 02:16:3e:fc:48:72               │ app_eth1 10.99.1.71, same mac, gw <nil>    │ ✓     │
+  ├────────────────────┼───────────────────────────────────────────────────────────┼────────────────────────────────────────────┼───────┤
+  │ VM NIC 3 (sw eth2) │ enp5s0 10.99.2.71/24, mac 02:16:3e:63:bf:f1               │ app_eth2 10.99.2.71, same mac, gw <nil>    │ ✓     │
+  └────────────────────┴───────────────────────────────────────────────────────────┴────────────────────────────────────────────┴───────┘
+
+  Summary
+
+  ┌─────────────────────┬──────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+  │       Aspect        │         Classic EVE (16.14.0-kvm-amd64)          │                     EVE-K (0.0.0-pr5989-94d9e61a-k-amd64)                     │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Hypervisor          │ KVM/QEMU directly under EVE pillar               │ KubeVirt (QEMU inside a virt-launcher pod) running on k3s                     │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Node uplink model   │ physical NIC kethN enslaved to bridge ethN       │ identical                                                                     │
+  │                     │ (original MAC on bridge); host IP on bridge      │                                                                               │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ App-NIC host handle │ TAP nbu*x1 (slave of host bridge)                │ veth nbu*x1@ifN (slave of host bridge), peer in pod netns                     │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ App-NIC inside      │ TAP → host bridge                                │ TAP tap<hash> → k6t bridge → <hash>-nic veth → host veth → host bridge (4     │
+  │ guest path          │                                                  │ extra L2 hops, all in the pod netns)                                          │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Multus / CNI        │ No                                               │ Yes — network-instance-attachment net-attach-def of type: eve-bridge          │
+  │ involved?           │                                                  │                                                                               │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Extra interfaces on │ dummy0, eth1-m, eth2-m, nbu*x1                   │ adds cni0, flannel.1, veth*@if4 (k3s pod network), many cni-… netns           │
+  │  host               │                                                  │                                                                               │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Pod network for     │ n/a                                              │ flannel 10.42.0.0/16 on cni0; this pod (virt-launcher) has eth0 10.42.0.41    │
+  │ system pods         │                                                  │                                                                               │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ MAC seen by L2 peer │ MAC of the QEMU virtio NIC (02:16:3e:…) —        │ MAC allocated by eve-bridge CNI to the pod side, then carried into the VMI by │
+  │  for VMI NIC        │ generated by EVE                                 │  KubeVirt (also 02:16:3e:… family, plus NAT NIC 06:99:10:…)                   │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Behaviour from      │ indistinguishable — same DHCP-allocated IPs,     │ indistinguishable — same DHCP-allocated IPs, same gateways                    │
+  │ outside             │ same gateways                                    │                                                                               │
+  ├─────────────────────┼──────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Zedcloud reporting  │ netStatusList per node/app reports MAC+IPs that  │ same — exactly matches SSH (verified above)                                   │
+  │                     │ exactly match SSH                                │                                                                               │
+  └─────────────────────┴──────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────┘
+
+  Functionally, from anywhere outside the EVE box the two flavors are identical at L2/L3: same MACs leak onto the wire, same DHCP-leased IPs land on enpNs0
+  inside the VM. The whole KubeVirt CNI sandwich is invisible to the network. The cost is the per-packet pod-netns trip and a much busier host link list (we
+  counted 30+ cni-* netns and ~40 veth*@if4 peers on the EVE-K node — flannel/k3s/CDI/KubeVirt/Longhorn machinery — versus essentially nothing extra on
+  classic).
+
