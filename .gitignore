@@ -13,3 +13,4 @@ terraform-provider-zedamigo*
 **/terraform.tfvars
 **/terraform.tfvars.json
 misc/
+**/*.iso

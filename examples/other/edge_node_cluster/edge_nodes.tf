@@ -28,7 +28,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
   # set it, therefore we need to flip the logic. We let the EVE-OS install run
   # and generate a "soft serial" and use it here.
   # serialno       = "SN_TEST_AAAA_${var.config_suffix}"
-  serialno       = zedamigo_installed_edge_node.ENODE_001.soft_serial
+  serialno       = "SN_${var.config_suffix}_001"
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -87,7 +87,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
 resource "zedcloud_edgenode" "ENODE_002" {
   name           = "ENODE_002_${var.config_suffix}"
   title          = "ENODE_002"
-  serialno       = zedamigo_installed_edge_node.ENODE_002.soft_serial
+  serialno       = "SN_${var.config_suffix}_002"
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -146,7 +146,7 @@ resource "zedcloud_edgenode" "ENODE_002" {
 resource "zedcloud_edgenode" "ENODE_003" {
   name           = "ENODE_003_${var.config_suffix}"
   title          = "ENODE_003"
-  serialno       = zedamigo_installed_edge_node.ENODE_003.soft_serial
+  serialno       = "SN_${var.config_suffix}_003"
   onboarding_key = var.onboarding_key
   model_id       = zedcloud_model.QEMU_VM.id
   project_id     = zedcloud_project.PROJECT.id
@@ -236,27 +236,24 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
 resource "zedamigo_installed_edge_node" "ENODE_001" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  serial_no       = "SN_${var.config_suffix}_001"
-  installer_iso   = zedamigo_eve_installer.eve_os_installer.filename
+  serial_no       = zedcloud_edgenode.ENODE_001.serialno
+  installer_iso   = "${path.module}/installer.iso"
   disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_002" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  serial_no       = "SN_${var.config_suffix}_002"
-  installer_iso   = zedamigo_eve_installer.eve_os_installer.filename
+  serial_no       = zedcloud_edgenode.ENODE_002.serialno
+  installer_iso   = "${path.module}/installer.iso"
   disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_003" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
-  serial_no       = "SN_${var.config_suffix}_003"
-  installer_iso   = zedamigo_eve_installer.eve_os_installer.filename
+  serial_no       = zedcloud_edgenode.ENODE_003.serialno
+  installer_iso   = "${path.module}/installer.iso"
   disk_image_base = zedamigo_disk_image.empty_disk.filename
 }
 

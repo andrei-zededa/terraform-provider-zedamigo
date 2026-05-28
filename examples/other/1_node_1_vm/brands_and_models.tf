@@ -6,7 +6,7 @@ resource "zedcloud_brand" "QEMU" {
 
 resource "zedcloud_model" "QEMU_VM" {
   name        = "QEMU_VM_TEST_${var.config_suffix}"
-  title       = "QEMU_VM_WITH_ETH3_SRIOV"
+  title       = "QEMU_VM_WITH_4_NICS"
   origin_type = "ORIGIN_LOCAL"
   brand_id    = zedcloud_brand.QEMU.id
   attr = {

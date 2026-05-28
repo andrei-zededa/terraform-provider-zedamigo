@@ -47,8 +47,8 @@ resource "zedcloud_edgenode" "ENODE_TEST" {
 }
 
 resource "zedamigo_eve_installer" "eve_os_installer_iso" {
-  name            = "EVE-OS"
-  tag             = "14.5.2-lts-kvm-amd64"
+  name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "16.0.0-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.ssh_pub_key
   grub_cfg        = <<-EOF
