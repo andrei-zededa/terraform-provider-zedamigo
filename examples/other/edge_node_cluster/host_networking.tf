@@ -87,23 +87,9 @@ resource "zedamigo_tap" "TAP_B_3" {
 }
 
 resource "zedamigo_bridge" "BRIDGE_C" {
-  name         = "brC-${var.config_suffix}"
-  mtu          = "1500"
-  state        = "up"
-  ipv4_address = "10.99.3.1/24"
-}
-
-resource "zedamigo_dhcp_server" "DHCP_C" {
-  interface  = zedamigo_bridge.BRIDGE_C.name
-  server_id  = "10.99.3.1"
-  nameserver = "9.9.9.9"
-  router     = "10.99.3.1"
-  netmask    = "255.255.255.0"
-  pool {
-    start = "10.99.3.70"
-    end   = "10.99.3.79"
-  }
-  lease_time = 86400
+  name  = "brC-${var.config_suffix}"
+  mtu   = "1500"
+  state = "up"
 }
 
 resource "zedamigo_tap" "TAP_C_1" {
