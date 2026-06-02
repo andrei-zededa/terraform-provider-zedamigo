@@ -17,12 +17,26 @@ Installed Edge Node
 
 ### Required
 
-- `disk_image_base` (String) Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)
 - `serial_no` (String) Installed Edge Node serial number
 
 ### Optional
 
-- `disk_1_image_base` (String) Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)
+- `disk` (Block List) Disk attached to the VM. Repeat the block to add a second disk: the first `disk` block is
+disk0, the second is disk1 (at most two). Mutually exclusive with the legacy
+`disk_image_base` / `disk_1_image_base` attributes.
+
+The `type` selects how the disk is backed:
+
+- `overlay` (default): a qcow2 overlay image is created backed by `source` (the historic
+  behavior of `disk_image_base`). `size_mb` resizes the created image.
+- `device`: `source` is a block device or partition (e.g. `/dev/sdb`, `/dev/sdb1`) used
+  as-is. The provider never creates, copies, resizes, or deletes it.
+- `file`: `source` is an existing disk image file used directly, without an overlay.
+
+On macOS (vfkit), `drive_if` and `options` are ignored and a direct `qcow2` disk
+(`type = "device"` or `"file"` with `format = "qcow2"`) is not supported. (see [below for nested schema](#nestedblock--disk))
+- `disk_1_image_base` (String) Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).
+- `disk_image_base` (String) Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.
 - `extra_qemu_args` (List of String) Extra CLI arguments for the QEMU command used to start the installation VM. Passed verbatim to QEMU.
 For example this can be used to create additional NICs for the installation VM:
       extra_qemu_args = [
@@ -51,3 +65,18 @@ Valid values: `"virtio"` (default) and `"serial"`.
 - `serial_console_log` (String) Edge Node log file of serial console output
 - `soft_serial` (String) EVE-OS soft serial number extracted from install log
 - `success` (Boolean) Whether the EVE-OS install finished succesfully
+
+<a id="nestedblock--disk"></a>
+### Nested Schema for `disk`
+
+Required:
+
+- `source` (String) For type=overlay, the qemu-img backing image. For type=device, the block device or partition path (e.g. /dev/sdb). For type=file, the path of an existing disk image file.
+
+Optional:
+
+- `drive_if` (String) The value of the interface (if) option for this disk's QEMU `-drive` flag (e.g. virtio, ide, scsi). QEMU-only; ignored on macOS (vfkit).
+- `format` (String) QEMU `-drive format=` value. Defaults to qcow2 for type=overlay and raw for type=device/file. Only qcow2 is allowed for type=overlay.
+- `options` (List of String) Extra `-drive` options for this disk, appended verbatim (comma-joined) to the `-drive` argument, e.g. ["cache=none", "aio=native", "discard=unmap"]. QEMU-only.
+- `size_mb` (Number) Disk image size in MB. Only valid for type=overlay (resizes the created image). If not specified, the size of the base image is preserved.
+- `type` (String) How the disk is backed: "overlay" (default; create a qcow2 overlay from source), "device" (use a block device / partition as-is), or "file" (use an existing image file as-is).

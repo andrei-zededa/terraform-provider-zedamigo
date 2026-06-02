@@ -48,31 +48,32 @@ type EdgeNode struct {
 
 // EdgeNodeModel describes the resource data model.
 type EdgeNodeModel struct {
-	ID               types.String `tfsdk:"id"`
-	Name             types.String `tfsdk:"name"`
-	Mem              types.String `tfsdk:"mem"`
-	CPUs             types.Int64  `tfsdk:"cpus"`
-	SerialNo         types.String `tfsdk:"serial_no"`
-	Nic0             types.String `tfsdk:"nic0"`
-	SerialPortServer types.Bool   `tfsdk:"serial_port_server"`
-	SerialPortSocket types.String `tfsdk:"serial_port_socket"`
-	DiskImgBase      types.String `tfsdk:"disk_image_base"`
-	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
-	DiskSizeMB       types.Int64  `tfsdk:"disk_size_mb"`
-	DriveIf          types.String `tfsdk:"drive_if"`
-	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
-	DiskImg          types.String `tfsdk:"disk_image"`
-	Disk1Img         types.String `tfsdk:"disk_1_image"`
-	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
-	SerialType       types.String `tfsdk:"serial_type"`
-	OvmfVarsSrc      types.String `tfsdk:"ovmf_vars_src"`
-	OvmfVars         types.String `tfsdk:"ovmf_vars"`
-	QmpSocket        types.String `tfsdk:"qmp_socket"`
-	VMRunning        types.Bool   `tfsdk:"vm_running"`
-	SSHPort          types.Int32  `tfsdk:"ssh_port"`
-	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
-	CPUPins          types.List   `tfsdk:"cpu_pins"`
-	UseGvproxy       types.Bool   `tfsdk:"use_gvproxy"`
+	ID               types.String     `tfsdk:"id"`
+	Name             types.String     `tfsdk:"name"`
+	Mem              types.String     `tfsdk:"mem"`
+	CPUs             types.Int64      `tfsdk:"cpus"`
+	SerialNo         types.String     `tfsdk:"serial_no"`
+	Nic0             types.String     `tfsdk:"nic0"`
+	SerialPortServer types.Bool       `tfsdk:"serial_port_server"`
+	SerialPortSocket types.String     `tfsdk:"serial_port_socket"`
+	DiskImgBase      types.String     `tfsdk:"disk_image_base"`
+	Disk1ImgBase     types.String     `tfsdk:"disk_1_image_base"`
+	DiskSizeMB       types.Int64      `tfsdk:"disk_size_mb"`
+	DriveIf          types.String     `tfsdk:"drive_if"`
+	SwTPMSock        types.String     `tfsdk:"swtpm_socket"`
+	DiskImg          types.String     `tfsdk:"disk_image"`
+	Disk1Img         types.String     `tfsdk:"disk_1_image"`
+	SerialConsoleLog types.String     `tfsdk:"serial_console_log"`
+	SerialType       types.String     `tfsdk:"serial_type"`
+	OvmfVarsSrc      types.String     `tfsdk:"ovmf_vars_src"`
+	OvmfVars         types.String     `tfsdk:"ovmf_vars"`
+	QmpSocket        types.String     `tfsdk:"qmp_socket"`
+	VMRunning        types.Bool       `tfsdk:"vm_running"`
+	SSHPort          types.Int32      `tfsdk:"ssh_port"`
+	ExtraArgs        types.List       `tfsdk:"extra_qemu_args"`
+	CPUPins          types.List       `tfsdk:"cpu_pins"`
+	UseGvproxy       types.Bool       `tfsdk:"use_gvproxy"`
+	Disks            []DiskBlockModel `tfsdk:"disk"`
 }
 
 func (r *EdgeNode) getResourceDir(id string) string {
@@ -194,26 +195,26 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				},
 			},
 			"disk_image_base": schema.StringAttribute{
-				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
-				MarkdownDescription: "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
-				Optional:            false,
-				Required:            true,
+				Description:         "Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.",
+				MarkdownDescription: "Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.",
+				Optional:            true,
+				Required:            false,
 			},
 			"disk_1_image_base": schema.StringAttribute{
-				Description:         "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
-				MarkdownDescription: "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				Description:         "Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).",
+				MarkdownDescription: "Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).",
 				Optional:            true,
 				Required:            false,
 			},
 			"disk_size_mb": schema.Int64Attribute{
-				Description:         "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
-				MarkdownDescription: "Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.",
+				Description:         "Disk image size in MB (megabytes, old-style power of 2) for the legacy disk_image_base / disk_1_image_base overlays. If not specified then the size of the base image will be preserved. For the `disk` block use the per-disk size_mb instead.",
+				MarkdownDescription: "Disk image size in MB (megabytes, old-style power of 2) for the legacy disk_image_base / disk_1_image_base overlays. If not specified then the size of the base image will be preserved. For the `disk` block use the per-disk size_mb instead.",
 				Optional:            true,
 				Required:            false,
 			},
 			"drive_if": schema.StringAttribute{
-				Description:         "The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.",
-				MarkdownDescription: "The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.",
+				Description:         "The value of the interface (if) option for the QEMU `-drive` flag for the legacy disk_image_base / disk_1_image_base disks. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. For the `disk` block use the per-disk drive_if instead. See also the help for QEMU `-drive`.",
+				MarkdownDescription: "The value of the interface (if) option for the QEMU `-drive` flag for the legacy disk_image_base / disk_1_image_base disks. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. For the `disk` block use the per-disk drive_if instead. See also the help for QEMU `-drive`.",
 				Optional:            true,
 				Required:            false,
 			},
@@ -290,6 +291,9 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Optional:    true,
 				Required:    false,
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"disk": diskSchemaBlock(),
 		},
 	}
 }
@@ -398,26 +402,33 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
+	disks, diskDiags := buildDisks(ctx, data.Disks, legacyDiskAttrs{
+		DiskImageBase:  data.DiskImgBase,
+		Disk1ImageBase: data.Disk1ImgBase,
+		DiskSizeMB:     data.DiskSizeMB,
+		DriveIf:        data.DriveIf,
+	})
+	resp.Diagnostics.Append(diskDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	vmConf := hypervisor.VMConfig{
-		Name:           data.Name.ValueString(),
-		ID:             data.ID.ValueString(),
-		SerialNo:       data.SerialNo.ValueString(),
-		ResourceDir:    d,
-		MemoryMB:       data.Mem.ValueString(),
-		CPUs:           data.CPUs.ValueInt64(),
-		DiskImageBase:  data.DiskImgBase.ValueString(),
-		Disk1ImageBase: data.Disk1ImgBase.ValueString(),
-		DiskSizeMB:     data.DiskSizeMB.ValueInt64(),
-		HasDiskSize:    !data.DiskSizeMB.IsNull(),
-		DriveIf:        data.DriveIf.ValueString(),
-		OVMFVarsSrc:    data.OvmfVarsSrc.ValueString(),
-		Nic0:           nic0,
-		SSHPort:        data.SSHPort.ValueInt32(),
-		SwTPMSocket:    data.SwTPMSock.ValueString(),
-		ExtraArgs:      extraArgs,
-		CPUPins:        cpuPins,
-		UseGvproxy:     !data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool(),
-		SerialType:     data.SerialType.ValueString(),
+		Name:        data.Name.ValueString(),
+		ID:          data.ID.ValueString(),
+		SerialNo:    data.SerialNo.ValueString(),
+		ResourceDir: d,
+		MemoryMB:    data.Mem.ValueString(),
+		CPUs:        data.CPUs.ValueInt64(),
+		Disks:       disks,
+		OVMFVarsSrc: data.OvmfVarsSrc.ValueString(),
+		Nic0:        nic0,
+		SSHPort:     data.SSHPort.ValueInt32(),
+		SwTPMSocket: data.SwTPMSock.ValueString(),
+		ExtraArgs:   extraArgs,
+		CPUPins:     cpuPins,
+		UseGvproxy:  !data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool(),
+		SerialType:  data.SerialType.ValueString(),
 	}
 
 	// Handle serial console config.
@@ -438,8 +449,8 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
-	data.DiskImg = types.StringValue(paths.DiskImage)
-	data.Disk1Img = types.StringValue(paths.Disk1Image)
+	data.DiskImg = types.StringValue(diskImagePath(paths.DiskImages, 0))
+	data.Disk1Img = types.StringValue(diskImagePath(paths.DiskImages, 1))
 	data.OvmfVars = types.StringValue(paths.OVMFVars)
 	data.QmpSocket = types.StringValue(fmt.Sprintf("unix:%s,server,nowait", paths.QMPSocket))
 

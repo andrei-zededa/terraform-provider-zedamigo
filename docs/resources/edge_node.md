@@ -17,7 +17,6 @@ Edge Node / VM in the general case
 
 ### Required
 
-- `disk_image_base` (String) Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)
 - `serial_no` (String) Edge Node (or VM) serial number
 
 ### Optional
@@ -27,9 +26,24 @@ the length must equal the number of CPUs. For example, with 4 CPUs
 and cpu_pins = [0, 2, 4, 6], vCPU 0 pins to host core 0, vCPU 1 to
 core 2, etc. Requires QEMU to start with debug-threads enabled.
 - `cpus` (Number) Number of CPUs that the VM running the edge node will have. Default: 4. See the QEMU `-smp` option.
-- `disk_1_image_base` (String) Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)
-- `disk_size_mb` (Number) Disk image size in MB (megabytes, old-style power of 2). If not specified then the size of the base image will be preserved.
-- `drive_if` (String) The value of the interface (if) option for the QEMU `-drive` flag. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. See also the help for QEMU `-drive`.
+- `disk` (Block List) Disk attached to the VM. Repeat the block to add a second disk: the first `disk` block is
+disk0, the second is disk1 (at most two). Mutually exclusive with the legacy
+`disk_image_base` / `disk_1_image_base` attributes.
+
+The `type` selects how the disk is backed:
+
+- `overlay` (default): a qcow2 overlay image is created backed by `source` (the historic
+  behavior of `disk_image_base`). `size_mb` resizes the created image.
+- `device`: `source` is a block device or partition (e.g. `/dev/sdb`, `/dev/sdb1`) used
+  as-is. The provider never creates, copies, resizes, or deletes it.
+- `file`: `source` is an existing disk image file used directly, without an overlay.
+
+On macOS (vfkit), `drive_if` and `options` are ignored and a direct `qcow2` disk
+(`type = "device"` or `"file"` with `format = "qcow2"`) is not supported. (see [below for nested schema](#nestedblock--disk))
+- `disk_1_image_base` (String) Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).
+- `disk_image_base` (String) Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.
+- `disk_size_mb` (Number) Disk image size in MB (megabytes, old-style power of 2) for the legacy disk_image_base / disk_1_image_base overlays. If not specified then the size of the base image will be preserved. For the `disk` block use the per-disk size_mb instead.
+- `drive_if` (String) The value of the interface (if) option for the QEMU `-drive` flag for the legacy disk_image_base / disk_1_image_base disks. This defines how the disk is presented to the VM. The default value is empty which for current versions of QEMU translates to `ide` which is a good option for running EVE-OS. Other valid options: ide, scsi, sd, mtd, floppy, pflash, virtio, none. For the `disk` block use the per-disk drive_if instead. See also the help for QEMU `-drive`.
 - `extra_qemu_args` (List of String) Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.
 				For example this can be used to create additional NICs for the edge node VM:
 				      extra_qemu_args = [
@@ -86,3 +100,18 @@ Valid values: `"virtio"` (default) and `"serial"`.
 **macOS (vfkit):** Always empty because vfkit does not support socket-based serial devices.
 - `ssh_port` (Number) Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed
 - `vm_running` (Boolean) Running state of the QEMU VM for this edge node
+
+<a id="nestedblock--disk"></a>
+### Nested Schema for `disk`
+
+Required:
+
+- `source` (String) For type=overlay, the qemu-img backing image. For type=device, the block device or partition path (e.g. /dev/sdb). For type=file, the path of an existing disk image file.
+
+Optional:
+
+- `drive_if` (String) The value of the interface (if) option for this disk's QEMU `-drive` flag (e.g. virtio, ide, scsi). QEMU-only; ignored on macOS (vfkit).
+- `format` (String) QEMU `-drive format=` value. Defaults to qcow2 for type=overlay and raw for type=device/file. Only qcow2 is allowed for type=overlay.
+- `options` (List of String) Extra `-drive` options for this disk, appended verbatim (comma-joined) to the `-drive` argument, e.g. ["cache=none", "aio=native", "discard=unmap"]. QEMU-only.
+- `size_mb` (Number) Disk image size in MB. Only valid for type=overlay (resizes the created image). If not specified, the size of the base image is preserved.
+- `type` (String) How the disk is backed: "overlay" (default; create a qcow2 overlay from source), "device" (use a block device / partition as-is), or "file" (use an existing image file as-is).

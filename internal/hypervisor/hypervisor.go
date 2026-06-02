@@ -4,19 +4,48 @@ package hypervisor
 
 import "context"
 
+// DiskType selects how a disk is backed.
+type DiskType string
+
+const (
+	// DiskOverlay creates a qcow2 overlay image backed by Source (the historic
+	// behavior of disk_image_base / disk_1_image_base).
+	DiskOverlay DiskType = "overlay"
+	// DiskDevice uses Source (a block device or partition, e.g. /dev/sdb) as-is.
+	DiskDevice DiskType = "device"
+	// DiskFile uses Source (an existing disk image file) as-is, without creating
+	// an overlay.
+	DiskFile DiskType = "file"
+)
+
+// DiskConfig describes a single disk (disk0, disk1, ...) attached to a VM.
+type DiskConfig struct {
+	Type DiskType
+	// Source is the qemu-img backing image for DiskOverlay, or the device/file
+	// path used directly for DiskDevice / DiskFile.
+	Source string
+	// Format is the resolved QEMU "-drive format=" value ("qcow2" or "raw").
+	Format string
+	// SizeMB resizes the created image (DiskOverlay only). Ignored when HasSize is false.
+	SizeMB  int64
+	HasSize bool
+	// DriveIf is the per-disk QEMU "-drive if=" value (e.g. "virtio"). QEMU-only.
+	DriveIf string
+	// Options are extra "-drive" key=value options appended verbatim. QEMU-only.
+	Options []string
+}
+
 // VMConfig contains all configuration needed to prepare and start a VM.
 type VMConfig struct {
-	Name       string
-	ID         string
-	SerialNo   string
+	Name        string
+	ID          string
+	SerialNo    string
 	ResourceDir string
-	MemoryMB   string // e.g. "4G", "4096", "4096M"
-	CPUs       int64
-	DiskImageBase  string
-	Disk1ImageBase string
-	DiskSizeMB     int64
-	HasDiskSize    bool
-	DriveIf    string // QEMU-specific, ignored by vfkit
+	MemoryMB    string // e.g. "4G", "4096", "4096M"
+	CPUs        int64
+
+	// Disks holds the VM disks in slot order: index 0 = disk0, index 1 = disk1.
+	Disks []DiskConfig
 
 	OVMFCode    string
 	OVMFVarsSrc string
@@ -38,15 +67,18 @@ type VMConfig struct {
 	UseGvproxy bool
 
 	// For installed_edge_node:
-	InstallerISO string
-	InstallerRaw string
+	InstallerISO   string
+	InstallerRaw   string
 	IsInstallation bool
 }
 
 // VMPaths holds the paths to files created during VM preparation and start.
 type VMPaths struct {
-	DiskImage        string
-	Disk1Image       string
+	// DiskImages holds the resolved path used in the QEMU "-drive file=" (or the
+	// vfkit VirtioBlk path) for each disk, aligned by index with VMConfig.Disks:
+	// the created overlay image for DiskOverlay, or the device/file source for
+	// DiskDevice / DiskFile.
+	DiskImages       []string
 	OVMFVars         string
 	QMPSocket        string // QEMU-only, empty on vfkit
 	PIDFile          string

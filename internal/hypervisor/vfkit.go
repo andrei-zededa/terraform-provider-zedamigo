@@ -63,32 +63,33 @@ func (h *VFKitHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPa
 	var paths VMPaths
 	d := conf.ResourceDir
 
-	// Convert qcow2 base images to raw format for vfkit.
-	paths.DiskImage = filepath.Join(d, "disk0.raw")
-	if err := h.convertToRaw(ctx, d, conf.DiskImageBase, paths.DiskImage); err != nil {
-		return paths, fmt.Errorf("unable to create disk image: %w", err)
-	}
-
-	// Resize if needed.
-	if conf.HasDiskSize {
-		res, err := cmd.Run(d, h.QemuImgPath, "resize", "-f", "raw", paths.DiskImage, fmt.Sprintf("%dM", conf.DiskSizeMB))
-		if err != nil {
-			return paths, fmt.Errorf("unable to resize disk image: %w; %s", err, res.Stderr)
-		}
-	}
-
-	// Create second disk image if configured.
-	paths.Disk1Image = ""
-	if conf.Disk1ImageBase != "" {
-		paths.Disk1Image = filepath.Join(d, "disk1.raw")
-		if err := h.convertToRaw(ctx, d, conf.Disk1ImageBase, paths.Disk1Image); err != nil {
-			return paths, fmt.Errorf("unable to create second disk image: %w", err)
-		}
-		if conf.HasDiskSize {
-			res, err := cmd.Run(d, h.QemuImgPath, "resize", "-f", "raw", paths.Disk1Image, fmt.Sprintf("%dM", conf.DiskSizeMB))
-			if err != nil {
-				return paths, fmt.Errorf("unable to resize second disk image: %w; %s", err, res.Stderr)
+	// Prepare disks in slot order (index 0 = disk0, 1 = disk1, ...).
+	paths.DiskImages = make([]string, len(conf.Disks))
+	for i, disk := range conf.Disks {
+		switch disk.Type {
+		case DiskDevice, DiskFile:
+			// vfkit attaches raw images / block devices directly; it cannot read
+			// qcow2. Reject a direct qcow2 disk with a clear error. The source
+			// lives outside the resource directory and is never modified here.
+			if disk.Format == "qcow2" {
+				return paths, fmt.Errorf("disk %d: vfkit does not support qcow2 direct disks; use a raw image or block device", i)
 			}
+			paths.DiskImages[i] = disk.Source
+		case DiskOverlay, "":
+			// Convert the qcow2 base image to raw format for vfkit.
+			raw := filepath.Join(d, fmt.Sprintf("disk%d.raw", i))
+			if err := h.convertToRaw(ctx, d, disk.Source, raw); err != nil {
+				return paths, fmt.Errorf("unable to create disk %d image: %w", i, err)
+			}
+			if disk.HasSize {
+				res, err := cmd.Run(d, h.QemuImgPath, "resize", "-f", "raw", raw, fmt.Sprintf("%dM", disk.SizeMB))
+				if err != nil {
+					return paths, fmt.Errorf("unable to resize disk %d image: %w; %s", i, err, res.Stderr)
+				}
+			}
+			paths.DiskImages[i] = raw
+		default:
+			return paths, fmt.Errorf("unknown disk %d type %q", i, disk.Type)
 		}
 	}
 
@@ -253,20 +254,15 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	vm := vfconfig.NewVirtualMachine(cpus, memMiB, bootloader)
 	vm.Nested = h.SupportsNestedVirt
 
-	// Root disk.
-	rootDisk, err := vfconfig.VirtioBlkNew(paths.DiskImage)
-	if err != nil {
-		return fmt.Errorf("configure root disk: %w", err)
-	}
-	devices := []vfconfig.VirtioDevice{rootDisk}
-
-	// Second disk.
-	if paths.Disk1Image != "" {
-		disk1, err := vfconfig.VirtioBlkNew(paths.Disk1Image)
+	// Disks (slot order: disk0, disk1, ...). Per-disk drive_if / options are
+	// QEMU-only and ignored by vfkit, which always attaches raw VirtioBlk devices.
+	var devices []vfconfig.VirtioDevice
+	for i, diskPath := range paths.DiskImages {
+		blk, err := vfconfig.VirtioBlkNew(diskPath)
 		if err != nil {
-			return fmt.Errorf("configure second disk: %w", err)
+			return fmt.Errorf("configure disk %d: %w", i, err)
 		}
-		devices = append(devices, disk1)
+		devices = append(devices, blk)
 	}
 
 	// Installer disk for installation mode.

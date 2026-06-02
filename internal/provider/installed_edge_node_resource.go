@@ -46,22 +46,23 @@ type InstalledNode struct {
 
 // InstalledNodeModel describes the resource data model.
 type InstalledNodeModel struct {
-	ID               types.String `tfsdk:"id"`
-	Name             types.String `tfsdk:"name"`
-	SerialNo         types.String `tfsdk:"serial_no"`
-	InstallerISO     types.String `tfsdk:"installer_iso"`
-	InstallerRaw     types.String `tfsdk:"installer_raw"`
-	DiskImgBase      types.String `tfsdk:"disk_image_base"`
-	Disk1ImgBase     types.String `tfsdk:"disk_1_image_base"`
-	SwTPMSock        types.String `tfsdk:"swtpm_socket"`
-	DiskImg          types.String `tfsdk:"disk_image"`
-	Disk1Img         types.String `tfsdk:"disk_1_image"`
-	SerialConsoleLog types.String `tfsdk:"serial_console_log"`
-	OvmfVars         types.String `tfsdk:"ovmf_vars"`
-	Success          types.Bool   `tfsdk:"success"`
-	SoftSerial       types.String `tfsdk:"soft_serial"`
-	SerialType       types.String `tfsdk:"serial_type"`
-	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
+	ID               types.String     `tfsdk:"id"`
+	Name             types.String     `tfsdk:"name"`
+	SerialNo         types.String     `tfsdk:"serial_no"`
+	InstallerISO     types.String     `tfsdk:"installer_iso"`
+	InstallerRaw     types.String     `tfsdk:"installer_raw"`
+	DiskImgBase      types.String     `tfsdk:"disk_image_base"`
+	Disk1ImgBase     types.String     `tfsdk:"disk_1_image_base"`
+	SwTPMSock        types.String     `tfsdk:"swtpm_socket"`
+	DiskImg          types.String     `tfsdk:"disk_image"`
+	Disk1Img         types.String     `tfsdk:"disk_1_image"`
+	SerialConsoleLog types.String     `tfsdk:"serial_console_log"`
+	OvmfVars         types.String     `tfsdk:"ovmf_vars"`
+	Success          types.Bool       `tfsdk:"success"`
+	SoftSerial       types.String     `tfsdk:"soft_serial"`
+	SerialType       types.String     `tfsdk:"serial_type"`
+	ExtraArgs        types.List       `tfsdk:"extra_qemu_args"`
+	Disks            []DiskBlockModel `tfsdk:"disk"`
 }
 
 func (r *InstalledNode) getResourceDir(id string) string {
@@ -112,14 +113,14 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Required:            false,
 			},
 			"disk_image_base": schema.StringAttribute{
-				Description:         "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
-				MarkdownDescription: "Disk image base from which the actual disk image used for this node will be created (qemu-img backing file)",
-				Optional:            false,
-				Required:            true,
+				Description:         "Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.",
+				MarkdownDescription: "Legacy disk0 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive). Either this or a `disk` block is required.",
+				Optional:            true,
+				Required:            false,
 			},
 			"disk_1_image_base": schema.StringAttribute{
-				Description:         "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
-				MarkdownDescription: "Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)",
+				Description:         "Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).",
+				MarkdownDescription: "Legacy disk1 backing file: a qcow2 overlay is created from it (qemu-img backing file). Alternative to the `disk` block (mutually exclusive).",
 				Optional:            true,
 				Required:            false,
 			},
@@ -192,6 +193,9 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"disk": diskSchemaBlock(),
 		},
 	}
 }
@@ -284,13 +288,23 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 	}
 
+	disks, diskDiags := buildDisks(ctx, data.Disks, legacyDiskAttrs{
+		DiskImageBase:  data.DiskImgBase,
+		Disk1ImageBase: data.Disk1ImgBase,
+		DiskSizeMB:     types.Int64Null(),
+		DriveIf:        types.StringNull(),
+	})
+	resp.Diagnostics.Append(diskDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	vmConf := hypervisor.VMConfig{
 		Name:           data.Name.ValueString(),
 		ID:             data.ID.ValueString(),
 		SerialNo:       data.SerialNo.ValueString(),
 		ResourceDir:    d,
-		DiskImageBase:  data.DiskImgBase.ValueString(),
-		Disk1ImageBase: data.Disk1ImgBase.ValueString(),
+		Disks:          disks,
 		Nic0:           nic0FmtInstall,
 		SwTPMSocket:    data.SwTPMSock.ValueString(),
 		SerialToFile:   filepath.Join(d, "serial_console_install.log"),
@@ -325,8 +339,8 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 
 	tflog.Trace(ctx, "Installed Edge Node Resource created succesfully")
 
-	data.DiskImg = types.StringValue(paths.DiskImage)
-	data.Disk1Img = types.StringValue(paths.Disk1Image)
+	data.DiskImg = types.StringValue(diskImagePath(paths.DiskImages, 0))
+	data.Disk1Img = types.StringValue(diskImagePath(paths.DiskImages, 1))
 
 	success, softSerial, err := readInstalledNode(r.providerConf, d)
 	if err != nil {

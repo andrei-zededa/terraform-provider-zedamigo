@@ -120,36 +120,32 @@ func (h *QEMUHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPat
 	var paths VMPaths
 	d := conf.ResourceDir
 
-	// Create primary disk image with backing file.
-	paths.DiskImage = filepath.Join(d, "disk0.disk_img.qcow2")
-	qemuImgArgs := []string{
-		"create", "-f", "qcow2",
-		"-b", conf.DiskImageBase, "-F", "qcow2",
-		paths.DiskImage,
-	}
-	if conf.HasDiskSize {
-		qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%dM", conf.DiskSizeMB))
-	}
-	res, err := cmd.Run(d, h.QemuImgPath, qemuImgArgs...)
-	if err != nil {
-		return paths, fmt.Errorf("unable to create disk image: %w; %s", err, res.Stderr)
-	}
-
-	// Create second disk image if configured.
-	paths.Disk1Image = ""
-	if conf.Disk1ImageBase != "" {
-		paths.Disk1Image = filepath.Join(d, "disk1.disk_img.qcow2")
-		qemuImgArgs := []string{
-			"create", "-f", "qcow2",
-			"-b", conf.Disk1ImageBase, "-F", "qcow2",
-			paths.Disk1Image,
-		}
-		if conf.HasDiskSize {
-			qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%dM", conf.DiskSizeMB))
-		}
-		res, err := cmd.Run(d, h.QemuImgPath, qemuImgArgs...)
-		if err != nil {
-			return paths, fmt.Errorf("unable to create second disk image: %w; %s", err, res.Stderr)
+	// Prepare disks in slot order (index 0 = disk0, 1 = disk1, ...).
+	paths.DiskImages = make([]string, len(conf.Disks))
+	for i, disk := range conf.Disks {
+		switch disk.Type {
+		case DiskDevice, DiskFile:
+			// Use the block device / partition / existing file directly; nothing
+			// to create. The source lives outside the resource directory and is
+			// never modified or removed by the provider.
+			paths.DiskImages[i] = disk.Source
+		case DiskOverlay, "":
+			img := filepath.Join(d, fmt.Sprintf("disk%d.disk_img.qcow2", i))
+			qemuImgArgs := []string{
+				"create", "-f", "qcow2",
+				"-b", disk.Source, "-F", "qcow2",
+				img,
+			}
+			if disk.HasSize {
+				qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%dM", disk.SizeMB))
+			}
+			res, err := cmd.Run(d, h.QemuImgPath, qemuImgArgs...)
+			if err != nil {
+				return paths, fmt.Errorf("unable to create disk %d image: %w; %s", i, err, res.Stderr)
+			}
+			paths.DiskImages[i] = img
+		default:
+			return paths, fmt.Errorf("unknown disk %d type %q", i, disk.Type)
 		}
 	}
 
@@ -264,14 +260,21 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		qemuArgs = append(qemuArgs, "-nic", conf.Nic0)
 	}
 
-	// Disk drives.
-	if conf.IsInstallation {
-		qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2", paths.DiskImage))
-		if paths.Disk1Image != "" {
-			qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2", paths.Disk1Image))
+	// Disk drives (slot order: disk0, disk1, ...).
+	for i, disk := range conf.Disks {
+		driveParts := []string{
+			fmt.Sprintf("file=%s", paths.DiskImages[i]),
+			fmt.Sprintf("format=%s", disk.Format),
 		}
+		if disk.DriveIf != "" {
+			driveParts = append(driveParts, fmt.Sprintf("if=%s", disk.DriveIf))
+		}
+		driveParts = append(driveParts, disk.Options...)
+		qemuArgs = append(qemuArgs, "-drive", strings.Join(driveParts, ","))
+	}
 
-		// Installer media.
+	// Installer media (installation only).
+	if conf.IsInstallation {
 		if conf.InstallerISO != "" {
 			qemuArgs = append(qemuArgs, "-cdrom", conf.InstallerISO)
 		} else if conf.InstallerRaw != "" {
@@ -281,18 +284,6 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		qemuArgs = append(qemuArgs,
 			"-boot", "once=d",
 		)
-	} else {
-		if conf.DriveIf != "" {
-			qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2,if=%s", paths.DiskImage, conf.DriveIf))
-			if paths.Disk1Image != "" {
-				qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2,if=%s", paths.Disk1Image, conf.DriveIf))
-			}
-		} else {
-			qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2", paths.DiskImage))
-			if paths.Disk1Image != "" {
-				qemuArgs = append(qemuArgs, "-drive", fmt.Sprintf("file=%s,format=qcow2", paths.Disk1Image))
-			}
-		}
 	}
 
 	// SwTPM.
