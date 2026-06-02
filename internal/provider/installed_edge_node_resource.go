@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -60,6 +61,7 @@ type InstalledNodeModel struct {
 	Success          types.Bool   `tfsdk:"success"`
 	SoftSerial       types.String `tfsdk:"soft_serial"`
 	SerialType       types.String `tfsdk:"serial_type"`
+	ExtraArgs        types.List   `tfsdk:"extra_qemu_args"`
 }
 
 func (r *InstalledNode) getResourceDir(id string) string {
@@ -126,6 +128,19 @@ func (r *InstalledNode) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "swtpm process unix socket",
 				Optional:            true,
 				Required:            false,
+			},
+			"extra_qemu_args": schema.ListAttribute{
+				Description: "Extra CLI arguments for the QEMU command used to start the installation VM. Passed verbatim to QEMU.",
+				MarkdownDescription: undent.Md(`
+				Extra CLI arguments for the QEMU command used to start the installation VM. Passed verbatim to QEMU.
+				For example this can be used to create additional NICs for the installation VM:
+				      extra_qemu_args = [
+				        "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
+				      ]
+				Considering that the respective TAP interfaces are created with the |zedamigo_tap| resource.`),
+				ElementType: types.StringType,
+				Optional:    true,
+				Required:    false,
 			},
 			"disk_image": schema.StringAttribute{
 				Description:         "Installed Edge Node disk image",
@@ -260,6 +275,15 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	var extraArgs []string
+	if !data.ExtraArgs.IsNull() {
+		diags := data.ExtraArgs.ElementsAs(ctx, &extraArgs, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	vmConf := hypervisor.VMConfig{
 		Name:           data.Name.ValueString(),
 		ID:             data.ID.ValueString(),
@@ -271,6 +295,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		SwTPMSocket:    data.SwTPMSock.ValueString(),
 		SerialToFile:   filepath.Join(d, "serial_console_install.log"),
 		SerialType:     data.SerialType.ValueString(),
+		ExtraArgs:      extraArgs,
 		IsInstallation: true,
 	}
 

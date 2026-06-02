@@ -23,6 +23,12 @@ Installed Edge Node
 ### Optional
 
 - `disk_1_image_base` (String) Disk image base from which the 2nd disk actual disk image used for this node will be created (qemu-img backing file)
+- `extra_qemu_args` (List of String) Extra CLI arguments for the QEMU command used to start the installation VM. Passed verbatim to QEMU.
+For example this can be used to create additional NICs for the installation VM:
+      extra_qemu_args = [
+        "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_101.name},script=no,downscript=no,model=e1000,mac=8c:84:74:11:01:01",
+      ]
+Considering that the respective TAP interfaces are created with the `zedamigo_tap` resource.
 - `installer_iso` (String) Installed Edge Node EVE-OS Installer ISO file
 - `installer_raw` (String) Installed Edge Node EVE-OS Installer RAW file (mutually exclusive with installer_iso)
 - `name` (String) Edge Node name

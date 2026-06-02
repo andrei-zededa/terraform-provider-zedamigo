@@ -310,10 +310,8 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		"-pidfile", paths.PIDFile,
 	)
 
-	// Extra args (edge_node only, not installation).
-	if !conf.IsInstallation {
-		qemuArgs = append(qemuArgs, conf.ExtraArgs...)
-	}
+	// Extra args (passed verbatim to QEMU for both edge nodes and installations).
+	qemuArgs = append(qemuArgs, conf.ExtraArgs...)
 
 	// Write debug script.
 	startVMscript := `#!/usr/bin/env bash
