@@ -348,7 +348,7 @@ func (h *QEMUHypervisor) ApplyCPUPins(ctx context.Context, conf VMConfig) error 
 
 const (
 	cpuPinPIDPollInterval = 200 * time.Millisecond
-	cpuPinPIDPollTimeout  = 5 * time.Second
+	cpuPinPIDPollTimeout  = 15 * time.Second
 )
 
 func (h *QEMUHypervisor) applyCPUPins(ctx context.Context, resourceDir string, cpuPins []int64, numCPUs int) error {
