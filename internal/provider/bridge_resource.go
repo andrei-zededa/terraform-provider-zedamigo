@@ -16,11 +16,13 @@ import (
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -55,6 +57,9 @@ type BridgeModel struct {
 	IPv4Address types.String `tfsdk:"ipv4_address"`
 	IPv6Address types.String `tfsdk:"ipv6_address"`
 	NetNS       types.String `tfsdk:"netns"`
+	// EnslavedInterfaces is the set of existing interfaces to attach as
+	// members (slaves) of this bridge.
+	EnslavedInterfaces types.Set `tfsdk:"enslaved_interfaces"`
 }
 
 func (r *Bridge) getResourceDir(id string) string {
@@ -115,6 +120,17 @@ func (r *Bridge) Schema(ctx context.Context, req resource.SchemaRequest, resp *r
 				Optional:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"enslaved_interfaces": schema.SetAttribute{
+				Description: "Names of existing interfaces to enslave (attach as members) to this bridge. " +
+					"Each interface is attached with `ip link set dev <interface> master <bridge>` and brought up. " +
+					"The interfaces must already exist in the same network namespace as the bridge. " +
+					"Changing this set requires the bridge to be re-created.",
+				Optional:    true,
+				ElementType: types.StringType,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.RequiresReplace(),
 				},
 			},
 		},
@@ -276,6 +292,39 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 			return
 		}
 
+	}
+
+	// Enslave any existing interfaces specified, attaching them as members
+	// of the bridge and bringing them up so traffic can flow through it.
+	if !data.EnslavedInterfaces.IsNull() && !data.EnslavedInterfaces.IsUnknown() {
+		var ifaces []string
+		resp.Diagnostics.Append(data.EnslavedInterfaces.ElementsAs(ctx, &ifaces, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, intf := range ifaces {
+			// Attach the interface as a member of the bridge.
+			moreArgs := []string{"link", "set", "dev", intf, "master", br}
+			res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			if err != nil {
+				resp.Diagnostics.AddError("Bridge Resource Error",
+					fmt.Sprintf("Unable to enslave interface '%s' to bridge '%s'.", intf, br))
+				resp.Diagnostics.Append(res.Diagnostics()...)
+				return
+			}
+
+			// Bring the enslaved interface up. NOTE: this MUST be done after
+			// setting the master.
+			moreArgs = []string{"link", "set", "dev", intf, "up"}
+			res, err = cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			if err != nil {
+				resp.Diagnostics.AddError("Bridge Resource Error",
+					fmt.Sprintf("Unable to bring enslaved interface '%s' up.", intf))
+				resp.Diagnostics.Append(res.Diagnostics()...)
+				return
+			}
+		}
 	}
 
 	// Read the bridge current state.
@@ -496,6 +545,35 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 				break
 			}
 		}
+	}
+
+	// Read the set of interfaces enslaved to (i.e. members of) the bridge.
+	// `ip link show master <br>` lists every interface whose master is this
+	// bridge, one entry per index line: "3: eth1: <...> master br0 ...".
+	moreArgs = []string{"link", "show", "master", br}
+	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	if err != nil {
+		return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' members: %w", br, err)
+	}
+	// Capture the interface name from each index line, stopping at ':' (plain
+	// names) or '@' (e.g. VLAN sub-interfaces like "eth1.10@eth1").
+	memberRegex := regexp.MustCompile(`(?m)^\s*\d+:\s+([^:@\s]+)`)
+	memberMatches := memberRegex.FindAllStringSubmatch(res.Stdout, -1)
+	if len(memberMatches) > 0 {
+		elems := make([]attr.Value, 0, len(memberMatches))
+		for _, m := range memberMatches {
+			if len(m) > 1 {
+				elems = append(elems, types.StringValue(m[1]))
+			}
+		}
+		members, diags := types.SetValue(types.StringType, elems)
+		if diags.HasError() {
+			return diags, fmt.Errorf("can't build bridge '%s' members set", br)
+		}
+		model.EnslavedInterfaces = members
+	} else {
+		// No members: keep this null so it matches an unconfigured plan.
+		model.EnslavedInterfaces = types.SetNull(types.StringType)
 	}
 
 	return nil, nil
