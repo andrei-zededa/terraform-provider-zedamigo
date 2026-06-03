@@ -489,33 +489,43 @@ func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPM
 
 	// Parse output for MTU and state.
 	lines := strings.Split(res.Stdout, "\n")
-	if len(lines) > 0 {
-		// Parse first line: "2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ..."
-		mtuRegex := regexp.MustCompile(`mtu (\d+)`)
-		if matches := mtuRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
-			x, err := strconv.ParseInt(matches[1], 10, 64)
-			if err != nil {
-				e := fmt.Errorf("invalid TAP '%s' MTU value '%s': %w", tapIf, matches[1], err)
-				d := diag.Diagnostics{}
-				d.AddError("Can't find TAP interface MTU value", e.Error())
-				return d, e
-			}
-			model.MTU = types.Int64Value(x)
+	// A real `ip link show` line always contains the flags section "<...>".
+	// If it doesn't, the output is empty or unparseable: fail loudly with the
+	// raw output instead of fabricating null/down values (which would surface
+	// as a spurious "inconsistent result after apply" error).
+	if len(lines) == 0 || !strings.Contains(lines[0], "<") {
+		return res.Diagnostics(),
+			fmt.Errorf("can't parse TAP '%s' link details, unexpected output: %q", tapIf, res.Stdout)
+	}
+	// Parse first line: "2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ..."
+	mtuRegex := regexp.MustCompile(`mtu (\d+)`)
+	if matches := mtuRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
+		x, err := strconv.ParseInt(matches[1], 10, 64)
+		if err != nil {
+			e := fmt.Errorf("invalid TAP '%s' MTU value '%s': %w", tapIf, matches[1], err)
+			d := diag.Diagnostics{}
+			d.AddError("Can't find TAP interface MTU value", e.Error())
+			return d, e
 		}
+		model.MTU = types.Int64Value(x)
+	}
 
-		// Check for master (bridge).
-		masterRegex := regexp.MustCompile(`master (\S+)`)
-		if matches := masterRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
-			model.Master = types.StringValue(matches[1])
-		} else {
-			model.Master = types.StringNull()
-		}
+	// Check for master (bridge).
+	masterRegex := regexp.MustCompile(`master (\S+)`)
+	if matches := masterRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
+		model.Master = types.StringValue(matches[1])
+	} else {
+		model.Master = types.StringNull()
+	}
 
-		if strings.Contains(lines[0], "UP") {
-			model.State = types.StringValue("up")
-		} else {
-			model.State = types.StringValue("down")
-		}
+	// Determine state from the administrative UP flag inside "<...>" rather
+	// than a substring match on the whole line. This reflects the state we
+	// actually set, independent of the operational "state DOWN"/NO-CARRIER
+	// condition that persists until QEMU opens the TAP.
+	if linkFlagUp(lines[0]) {
+		model.State = types.StringValue("up")
+	} else {
+		model.State = types.StringValue("down")
 	}
 
 	// Get IP address(es) of TAP.

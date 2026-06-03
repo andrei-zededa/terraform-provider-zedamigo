@@ -418,25 +418,31 @@ func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VL
 
 	// Parse output for MTU and state.
 	lines := strings.Split(res.Stdout, "\n")
-	if len(lines) > 0 {
-		// Parse first line: "2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ..."
-		mtuRegex := regexp.MustCompile(`mtu (\d+)`)
-		if matches := mtuRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
-			x, err := strconv.ParseInt(matches[1], 10, 64)
-			if err != nil {
-				e := fmt.Errorf("invalid VLAN '%s' MTU value '%s': %w", subIf, matches[1], err)
-				d := diag.Diagnostics{}
-				d.AddError("Can't find VLAN interface MTU value", e.Error())
-				return d, e
-			}
-			model.MTU = types.Int64Value(x)
+	// A real `ip link show` line always contains the flags section "<...>".
+	// If it doesn't, the output is empty or unparseable: fail loudly with the
+	// raw output instead of fabricating a "down" state.
+	if len(lines) == 0 || !strings.Contains(lines[0], "<") {
+		return res.Diagnostics(),
+			fmt.Errorf("can't parse VLAN '%s' link details, unexpected output: %q", subIf, res.Stdout)
+	}
+	// Parse first line: "2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ..."
+	mtuRegex := regexp.MustCompile(`mtu (\d+)`)
+	if matches := mtuRegex.FindStringSubmatch(lines[0]); len(matches) > 1 {
+		x, err := strconv.ParseInt(matches[1], 10, 64)
+		if err != nil {
+			e := fmt.Errorf("invalid VLAN '%s' MTU value '%s': %w", subIf, matches[1], err)
+			d := diag.Diagnostics{}
+			d.AddError("Can't find VLAN interface MTU value", e.Error())
+			return d, e
 		}
+		model.MTU = types.Int64Value(x)
+	}
 
-		if strings.Contains(lines[0], "UP") {
-			model.State = types.StringValue("up")
-		} else {
-			model.State = types.StringValue("down")
-		}
+	// Determine state from the administrative UP flag inside "<...>".
+	if linkFlagUp(lines[0]) {
+		model.State = types.StringValue("up")
+	} else {
+		model.State = types.StringValue("down")
 	}
 
 	// Parse MAC address from second line: "    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff"

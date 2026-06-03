@@ -52,36 +52,19 @@ func Run(logPath string, command string, args ...string) (Result, error) {
 
 	cmd := exec.Command(command, args...)
 
-	// Create pipes for capturing output.
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create stdout pipe: %w", err)
-		return result, result.Error
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create stderr pipe: %w", err)
-		return result, result.Error
-	}
-
-	// Start the command.
-	if err := cmd.Start(); err != nil {
-		result.Error = fmt.Errorf("failed to start command: %w", err)
-		return result, result.Error
-	}
+	// Capture output by assigning writers directly. When Stdout/Stderr are
+	// not *os.File, exec spawns the copy goroutines internally and Run/Wait
+	// is guaranteed to wait for that copying to complete before returning.
+	// (Using StdoutPipe + our own goroutines here would be racy: Wait can
+	// return before the goroutines have drained the pipes, yielding empty or
+	// truncated output.)
 	stdoutBuf := &safeBuffer{}
-	go func() {
-		mw := io.MultiWriter(outFile, stdoutBuf)
-		io.Copy(mw, stdoutPipe)
-	}()
 	stderrBuf := &safeBuffer{}
-	go func() {
-		mw := io.MultiWriter(errFile, stderrBuf)
-		io.Copy(mw, stderrPipe)
-	}()
+	cmd.Stdout = io.MultiWriter(outFile, stdoutBuf)
+	cmd.Stderr = io.MultiWriter(errFile, stderrBuf)
 
-	// Wait for the command to finish.
-	if err := cmd.Wait(); err != nil {
+	// Run the command and wait for it (and the output copying) to finish.
+	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
 		}
