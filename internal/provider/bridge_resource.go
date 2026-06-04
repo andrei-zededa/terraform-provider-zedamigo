@@ -126,7 +126,10 @@ func (r *Bridge) Schema(ctx context.Context, req resource.SchemaRequest, resp *r
 				Description: "Names of existing interfaces to enslave (attach as members) to this bridge. " +
 					"Each interface is attached with `ip link set dev <interface> master <bridge>` and brought up. " +
 					"The interfaces must already exist in the same network namespace as the bridge. " +
-					"Changing this set requires the bridge to be re-created.",
+					"Changing this set requires the bridge to be re-created. " +
+					"Only list interfaces that are not otherwise managed as bridge members: do not include " +
+					"interfaces (such as `zedamigo_tap` resources) that attach themselves via their own `master` " +
+					"attribute, as those are owned by the other resource and are deliberately ignored here.",
 				Optional:    true,
 				ElementType: types.StringType,
 				PlanModifiers: []planmodifier.Set{
@@ -547,33 +550,57 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 		}
 	}
 
-	// Read the set of interfaces enslaved to (i.e. members of) the bridge.
-	// `ip link show master <br>` lists every interface whose master is this
-	// bridge, one entry per index line: "3: eth1: <...> master br0 ...".
-	moreArgs = []string{"link", "show", "master", br}
-	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
-	if err != nil {
-		return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' members: %w", br, err)
-	}
-	// Capture the interface name from each index line, stopping at ':' (plain
-	// names) or '@' (e.g. VLAN sub-interfaces like "eth1.10@eth1").
-	memberRegex := regexp.MustCompile(`(?m)^\s*\d+:\s+([^:@\s]+)`)
-	memberMatches := memberRegex.FindAllStringSubmatch(res.Stdout, -1)
-	if len(memberMatches) > 0 {
-		elems := make([]attr.Value, 0, len(memberMatches))
-		for _, m := range memberMatches {
+	// Reconcile the set of interfaces this resource explicitly enslaved.
+	//
+	// `ip link show master <br>` lists EVERY interface whose master is this
+	// bridge, but other resources may attach members on their own (e.g. a
+	// zedamigo_tap with its own `master` set). Those foreign members must not
+	// land in `enslaved_interfaces`: this attribute is RequiresReplace, so
+	// reporting them would force a spurious destroy/recreate of the bridge.
+	//
+	// Instead we reconcile only against the interfaces already recorded in the
+	// incoming model (prior state on Read, the configured set on Create): keep
+	// the ones we manage that are still members (so real drift is detected),
+	// drop everything else, and stay null when we manage none.
+	if model.EnslavedInterfaces.IsNull() || model.EnslavedInterfaces.IsUnknown() {
+		model.EnslavedInterfaces = types.SetNull(types.StringType)
+	} else {
+		moreArgs = []string{"link", "show", "master", br}
+		res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+		if err != nil {
+			return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' members: %w", br, err)
+		}
+		// Capture the interface name from each index line, stopping at ':'
+		// (plain names) or '@' (e.g. VLAN sub-interfaces like "eth1.10@eth1").
+		memberRegex := regexp.MustCompile(`(?m)^\s*\d+:\s+([^:@\s]+)`)
+		current := make(map[string]bool)
+		for _, m := range memberRegex.FindAllStringSubmatch(res.Stdout, -1) {
 			if len(m) > 1 {
-				elems = append(elems, types.StringValue(m[1]))
+				current[m[1]] = true
 			}
 		}
-		members, diags := types.SetValue(types.StringType, elems)
-		if diags.HasError() {
-			return diags, fmt.Errorf("can't build bridge '%s' members set", br)
+
+		// Keep only managed interfaces that are still members of the bridge.
+		kept := make([]attr.Value, 0, len(model.EnslavedInterfaces.Elements()))
+		for _, e := range model.EnslavedInterfaces.Elements() {
+			s, ok := e.(types.String)
+			if !ok || s.IsNull() || s.IsUnknown() {
+				continue
+			}
+			if current[s.ValueString()] {
+				kept = append(kept, s)
+			}
 		}
-		model.EnslavedInterfaces = members
-	} else {
-		// No members: keep this null so it matches an unconfigured plan.
-		model.EnslavedInterfaces = types.SetNull(types.StringType)
+		if len(kept) > 0 {
+			members, diags := types.SetValue(types.StringType, kept)
+			if diags.HasError() {
+				return diags, fmt.Errorf("can't build bridge '%s' members set", br)
+			}
+			model.EnslavedInterfaces = members
+		} else {
+			// Nothing we manage remains: keep null to match an unconfigured plan.
+			model.EnslavedInterfaces = types.SetNull(types.StringType)
+		}
 	}
 
 	return nil, nil
