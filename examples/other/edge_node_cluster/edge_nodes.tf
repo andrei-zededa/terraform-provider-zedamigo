@@ -210,7 +210,7 @@ resource "zedcloud_edgenode" "ENODE_003" {
 #### QEMU VM with EVE-OS.
 resource "zedamigo_disk_image" "empty_disk" {
   name    = "empty_disk"
-  size_mb = 200000 # ~200GB
+  size_mb = 30000 # ~30GB
 }
 
 #### This creates a custom EVE-OS installer ISO, it basically runs
@@ -236,25 +236,73 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
 resource "zedamigo_installed_edge_node" "ENODE_001" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  serial_no       = zedcloud_edgenode.ENODE_001.serialno
-  installer_iso   = "${path.module}/installer.iso"
-  disk_image_base = zedamigo_disk_image.empty_disk.filename
+  serial_no     = zedcloud_edgenode.ENODE_001.serialno
+  installer_iso = "${path.module}/installer.iso"
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm1-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
+
+  # extra_qemu_args = [
+  # Separate "more performance" disk for persist.
+  # This needs: `setfacl -m u:$USER:rw /dev/ubuntu-vg/vm1-disk` or to run as root.
+  # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm1-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+  # "-device", "virtio-blk-pci,drive=persist,num-queues=4"
+  # ]
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_002" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  serial_no       = zedcloud_edgenode.ENODE_002.serialno
-  installer_iso   = "${path.module}/installer.iso"
-  disk_image_base = zedamigo_disk_image.empty_disk.filename
+  serial_no     = zedcloud_edgenode.ENODE_002.serialno
+  installer_iso = "${path.module}/installer.iso"
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm2-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
+
+  # extra_qemu_args = [
+  # Separate "more performance" disk for persist.
+  # This needs: `setfacl -m u:$USER:rw /dev/ubuntu-vg/vm2-disk` or to run as root.
+  # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm2-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+  # "-device", "virtio-blk-pci,drive=persist,num-queues=4"
+  # ]
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_003" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
-  serial_no       = zedcloud_edgenode.ENODE_003.serialno
-  installer_iso   = "${path.module}/installer.iso"
-  disk_image_base = zedamigo_disk_image.empty_disk.filename
+  serial_no     = zedcloud_edgenode.ENODE_003.serialno
+  installer_iso = "${path.module}/installer.iso"
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm3-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
+
+  # extra_qemu_args = [
+  # Separate "more performance" disk for persist.
+  # This needs: `setfacl -m u:$USER:rw /dev/ubuntu-vg/vm3-disk` or to run as root.
+  # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm3-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+  # "-device", "virtio-blk-pci,drive=persist,num-queues=4"
+  # ]
+}
+
+resource "time_sleep" "ENODE_001" {
+  depends_on = [zedamigo_installed_edge_node.ENODE_001]
+
+  create_duration = "1s"
 }
 
 #### This starts a QEMU VM with the disk onto which EVE-OS was installed basically
@@ -285,6 +333,8 @@ resource "zedamigo_installed_edge_node" "ENODE_003" {
 #### `ssh_port` is the value. Also `serial_console_log` is all the output
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_001" {
+  depends_on = [time_sleep.ENODE_001]
+
   name     = "ENODE_001_${var.config_suffix}"
   cpus     = 6
   cpu_pins = [14, 15, 4, 6, 10, 12]
@@ -292,10 +342,22 @@ resource "zedamigo_edge_node" "ENODE_001" {
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_001.serial_no
   serial_port_server = true
-  disk_image_base    = zedamigo_installed_edge_node.ENODE_001.disk_image
-  ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_001.ovmf_vars
+  # disk_image_base    = zedamigo_installed_edge_node.ENODE_001.disk_image
+  ovmf_vars_src = zedamigo_installed_edge_node.ENODE_001.ovmf_vars
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm1-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
 
   extra_qemu_args = [
+    # Separate "more performance" disk for persist.
+    # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm1-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+    # "-device", "virtio-blk-pci,drive=persist,num-queues=4",
+
     # Plain virtio NIC mode.
     "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_1.name},script=no,downscript=no,model=virtio,mac=1E:94:C2:3F:A:01",
     "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_1.name},script=no,downscript=no,model=virtio,mac=1E:94:C2:3F:B:01",
@@ -303,7 +365,15 @@ resource "zedamigo_edge_node" "ENODE_001" {
   ]
 }
 
+resource "time_sleep" "ENODE_002" {
+  depends_on = [zedamigo_installed_edge_node.ENODE_002]
+
+  create_duration = "600s"
+}
+
 resource "zedamigo_edge_node" "ENODE_002" {
+  depends_on = [time_sleep.ENODE_002]
+
   name     = "ENODE_002_${var.config_suffix}"
   cpus     = 6
   cpu_pins = [2, 3, 4, 5, 6, 7]
@@ -311,10 +381,22 @@ resource "zedamigo_edge_node" "ENODE_002" {
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_002.serial_no
   serial_port_server = true
-  disk_image_base    = zedamigo_installed_edge_node.ENODE_002.disk_image
-  ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_002.ovmf_vars
+  # disk_image_base    = zedamigo_installed_edge_node.ENODE_002.disk_image
+  ovmf_vars_src = zedamigo_installed_edge_node.ENODE_002.ovmf_vars
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm2-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
 
   extra_qemu_args = [
+    # Separate "more performance" disk for persist.
+    # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm2-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+    # "-device", "virtio-blk-pci,drive=persist,num-queues=4",
+
     # Plain virtio NIC mode.
     "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_2.name},script=no,downscript=no,model=virtio,mac=1E:84:C2:3F:A:02",
     "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_2.name},script=no,downscript=no,model=virtio,mac=1E:84:C2:3F:B:02",
@@ -322,7 +404,15 @@ resource "zedamigo_edge_node" "ENODE_002" {
   ]
 }
 
+resource "time_sleep" "ENODE_003" {
+  depends_on = [zedamigo_installed_edge_node.ENODE_003]
+
+  create_duration = "900s"
+}
+
 resource "zedamigo_edge_node" "ENODE_003" {
+  depends_on = [time_sleep.ENODE_003]
+
   name     = "ENODE_003_${var.config_suffix}"
   cpus     = 6
   cpu_pins = [8, 9, 10, 11, 12, 13]
@@ -330,10 +420,22 @@ resource "zedamigo_edge_node" "ENODE_003" {
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_003.serial_no
   serial_port_server = true
-  disk_image_base    = zedamigo_installed_edge_node.ENODE_003.disk_image
-  ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_003.ovmf_vars
+  # disk_image_base    = zedamigo_installed_edge_node.ENODE_003.disk_image
+  ovmf_vars_src = zedamigo_installed_edge_node.ENODE_003.ovmf_vars
+
+  disk {
+    type     = "device"
+    source   = "/dev/ubuntu-vg/vm3-disk"
+    format   = "raw"
+    drive_if = "virtio"
+    options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
+  }
 
   extra_qemu_args = [
+    # Separate "more performance" disk for persist.
+    # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm3-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
+    # "-device", "virtio-blk-pci,drive=persist,num-queues=4",
+
     # Plain virtio NIC mode.
     "-nic", "tap,id=vmnet1,ifname=${zedamigo_tap.TAP_A_3.name},script=no,downscript=no,model=virtio,mac=1E:97:C2:3F:A:03",
     "-nic", "tap,id=vmnet2,ifname=${zedamigo_tap.TAP_B_3.name},script=no,downscript=no,model=virtio,mac=1E:97:C2:3F:B:03",

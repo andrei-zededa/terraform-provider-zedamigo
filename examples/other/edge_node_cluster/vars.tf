@@ -28,3 +28,33 @@ variable "config_suffix" {
   type    = string
   default = "abc1"
 }
+
+variable "DOCKERHUB_USERNAME" {
+  sensitive = false
+  type      = string
+  default   = "andreizededa"
+}
+
+variable "DOCKERHUB_IMAGE_NAME" {
+  sensitive = false
+  type      = string
+  default   = "hello-zedcloud"
+}
+
+variable "DOCKERHUB_IMAGE_LATEST_TAG" {
+  sensitive = false
+  type      = string
+  default   = "v0.8.5"
+}
+
+variable "HELLO_ZEDCLOUD_APP_USERNAME" {
+  sensitive = false
+  type      = string
+  default   = "user1"
+}
+
+variable "HELLO_ZEDCLOUD_APP_PASSWORD" {
+  sensitive = true
+  type      = string
+  default   = "pass1"
+}
