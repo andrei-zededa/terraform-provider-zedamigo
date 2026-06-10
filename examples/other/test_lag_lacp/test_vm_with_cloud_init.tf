@@ -44,7 +44,12 @@ resource "zedamigo_edge_node" "TEST_VM_01" {
 
     # Two NICs wired to the host TAPs; inside the VM these become the bond
     # members. The MACs here MUST match the ones in cloud-init/network-config.
-    "-nic", "tap,id=lagm0,ifname=${zedamigo_tap.LAG_M0.name},script=no,downscript=no,model=virtio-net-pci,mac=52:54:00:00:0a:01",
-    "-nic", "tap,id=lagm1,ifname=${zedamigo_tap.LAG_M1.name},script=no,downscript=no,model=virtio-net-pci,mac=52:54:00:00:0a:02",
+    # NOTE: speed and duplex are a MUST, otherwise inside of the VM these being virtio
+    # NICs the guest kernel will not see a speed/duplex setting and cannot configure
+    # them with LACP (other bond modes might work without speed/duplex).
+    "-netdev", "tap,id=net-lagm0,ifname=${zedamigo_tap.LAG_M0.name},script=no,downscript=no",
+    "-device", "virtio-net-pci,id=nic-lagm0,netdev=net-lagm0,mac=52:54:00:00:0a:01,speed=10000,duplex=full",
+    "-netdev", "tap,id=net-lagm1,ifname=${zedamigo_tap.LAG_M1.name},script=no,downscript=no",
+    "-device", "virtio-net-pci,id=nic-lagm1,netdev=net-lagm1,mac=52:54:00:00:0a:02,speed=10000,duplex=full",
   ]
 }
