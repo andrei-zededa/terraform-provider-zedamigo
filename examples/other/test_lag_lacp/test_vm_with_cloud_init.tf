@@ -32,7 +32,7 @@ resource "zedamigo_edge_node" "TEST_VM_01" {
   mem                = "2G"
   serial_no          = "1000"
   serial_port_server = true
-  disk_image_base    = var.ubuntu_image
+  disk_image_base    = local.final_ubuntu_image
   disk_size_mb       = "20000" # ~ 20GB
   drive_if           = "virtio"
 
