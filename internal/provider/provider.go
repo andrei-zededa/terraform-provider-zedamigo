@@ -260,6 +260,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewCloudInitISO,
 		NewBridge,
 		NewTAP,
+		NewLAG,
 		NewVLAN,
 		NewDHCPServer,
 		NewDHCP6Server,

@@ -38,7 +38,7 @@ resource "zedamigo_bridge" "br1000" {
 
 ### Optional
 
-- `enslaved_interfaces` (Set of String) Names of existing interfaces to enslave (attach as members) to this bridge. Each interface is attached with `ip link set dev <interface> master <bridge>` and brought up. The interfaces must already exist in the same network namespace as the bridge. Changing this set requires the bridge to be re-created.
+- `enslaved_interfaces` (Set of String) Names of existing interfaces to enslave (attach as members) to this bridge. Each interface is attached with `ip link set dev <interface> master <bridge>` and brought up. The interfaces must already exist in the same network namespace as the bridge. Changing this set requires the bridge to be re-created. Only list interfaces that are not otherwise managed as bridge members: do not include interfaces (such as `zedamigo_tap` resources) that attach themselves via their own `master` attribute, as those are owned by the other resource and are deliberately ignored here.
 - `ipv4_address` (String) IPv4 address for the bridge
 - `ipv6_address` (String) IPv6 address for the bridge
 - `mac_address` (String) MAC address for the bridge

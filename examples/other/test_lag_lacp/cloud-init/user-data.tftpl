@@ -1,0 +1,66 @@
+#cloud-config
+
+# Grow the root filesystem to maximum size, first the partition.
+growpart:
+  mode: auto
+  devices: ['/']
+  ignore_growroot_disabled: false
+
+# Create the login user with SSH key authentication.
+users:
+  - name: ${user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${user_ssh_pub_key}
+
+# Remove the default cloud-image users.
+userdel:
+  remove: true
+  force: true
+  users:
+    - ubuntu
+    - cloud-user
+    - ec2-user
+    - centos
+    - admin
+    - default
+    - user
+
+preserve_users:
+  - root
+  - systemd-network
+  - systemd-resolve
+  - systemd-timesync
+  - messagebus
+  - syslog
+  - _apt
+  - nobody
+  - systemd-coredump
+  - ${user}
+
+ssh_pwauth: false
+
+# Tools for inspecting the bond / LACP state from inside the VM.
+packages:
+  - ethtool
+  - net-tools
+package_update: true
+
+ssh:
+  install-server: true
+  disable_root: true
+  ssh_deletekeys: true
+  ssh_genkeytypes: ['rsa', 'ecdsa', 'ed25519']
+
+# Grow the filesystem after growpart grew the partition.
+runcmd:
+  - 'resize2fs $(findmnt -n -o source /)'
+
+hostname: ${hostname}
+fqdn: ${hostname}.${domainname}
+
+final_message: |
+  test-lag VM ready after $UPTIME seconds.
+  Inspect the bond with:  cat /proc/net/bonding/bond0
+  and ping the host LAG:  ping -c3 10.10.10.1
