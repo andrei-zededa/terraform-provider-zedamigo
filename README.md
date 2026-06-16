@@ -247,7 +247,9 @@ Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-ins
 
 ### Limitations
 
-- Networking resources (`bridge`, `tap`, `vlan`, `dhcp_server`, `dhcp6_server`, `radv`) are **not supported** on macOS.
+- Networking resources (`netns`, `bridge`, `tap`, `vlan`, `lag`, `dhcp_server`,
+  `dhcp6_server`, `radv`) and the monitoring daemons (`internet_monitor`,
+  `monitor_system_usage`) are **not supported** on macOS.
 - Nested virtualization (EVE-OS running VMs inside the VM) requires **Apple M3 or later**.
 - **Edge node onboarding must use the soft serial on macOS.** On Linux (QEMU), the
   VM serial number can be set via SMBIOS (`-smbios type=1,serial=...`) and EVE-OS
@@ -367,15 +369,26 @@ from the source code in the [docs/](docs/) folder.
 | [edge_node](docs/resources/edge_node.md) | ✅ | ✅ | |
 | [local_datastore](docs/resources/local_datastore.md) | ✅ | ✅ | Embedded Go HTTP server |
 | [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ✅ | Requires `genisoimage` |
-| [bridge](docs/resources/bridge.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
-| [tap](docs/resources/tap.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
-| [vlan](docs/resources/vlan.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
-| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
-| [dhcp6_server](docs/resources/dhcp6_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
-| [radv](docs/resources/radv.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
 | [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ✅ | Alias for edge_node |
 | [vm](docs/resources/vm.md) | ✅ | ✅ | Alias for edge_node |
 | [swtpm](docs/resources/swtpm.md) | WIP | WIP | |
+| [netns](docs/resources/netns.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [bridge](docs/resources/bridge.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [tap](docs/resources/tap.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [vlan](docs/resources/vlan.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [lag](docs/resources/lag.md) | ✅ | ❌ | Linux only, needs `use_sudo = true`; bonding / LACP link-aggregation |
+| [dhcp_server](docs/resources/dhcp_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true`; embedded CoreDHCP |
+| [dhcp6_server](docs/resources/dhcp6_server.md) | ✅ | ❌ | Linux only, needs `use_sudo = true`; embedded CoreDHCP |
+| [radv](docs/resources/radv.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
+| [internet_monitor](docs/resources/internet_monitor.md) | ✅ | ❌ | Linux only; embedded connectivity-probe daemon |
+| [monitor_system_usage](docs/resources/monitor_system_usage.md) | ✅ | ❌ | Linux only; embedded `msu-collect` daemon |
+
+The provider also exposes the following data sources:
+
+| Data source | Linux (amd64) | macOS (arm64) | Notes |
+|---|:---:|:---:|---|
+| [system_info](docs/data-sources/system_info.md) | ✅ | ✅ | Host CPU count and total/used memory |
+| [eve_installer](docs/data-sources/eve_installer.md) | ✅ | ✅ | Reference an existing EVE-OS installer file |
 
 ## Troubleshooting
 
