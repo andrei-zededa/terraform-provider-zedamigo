@@ -28,7 +28,6 @@ import (
 
 const (
 	edgeNodesDir = "edge_nodes"
-	nic0Fmt      = "user,id=usernet0,ipv6=off,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:10022,hostfwd=tcp::%d-:10080,model=virtio"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -70,6 +69,7 @@ type EdgeNodeModel struct {
 	QmpSocket        types.String     `tfsdk:"qmp_socket"`
 	VMRunning        types.Bool       `tfsdk:"vm_running"`
 	SSHPort          types.Int32      `tfsdk:"ssh_port"`
+	Nic0PortForwards types.String     `tfsdk:"nic0_port_forwards"`
 	ExtraArgs        types.List       `tfsdk:"extra_qemu_args"`
 	CPUPins          types.List       `tfsdk:"cpu_pins"`
 	UseGvproxy       types.Bool       `tfsdk:"use_gvproxy"`
@@ -124,7 +124,7 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Required:            true,
 			},
 			"nic0": schema.StringAttribute{
-				Description: "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `" + nic0Fmt + "`",
+				Description: "QEMU `-nic` options for the first (#0) NIC of the edge node VM. Default: `" + hypervisor.SLIRPNic0Doc() + "`",
 				MarkdownDescription: undent.Md(`
 				By default the first NIC (#0) of the edge node VM will use QEMU "user mode networking", which means that QEMU
 				will run an internal DHCP server and internal NAT/router to provide the VM with the same connectivity that
@@ -256,9 +256,28 @@ func (r *EdgeNode) Schema(ctx context.Context, req resource.SchemaRequest, resp 
 				Computed:            true,
 			},
 			"ssh_port": schema.Int32Attribute{
-				Description:         "Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed",
-				MarkdownDescription: "Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed",
-				Computed:            true,
+				Description: "Localhost port forwarded to the edge node (EVE-OS) TCP port 22. " +
+					"Populated when the default `nic0` is used, or when gvproxy is enabled (always on macOS). " +
+					"Null when a custom `nic0` is used on Linux without gvproxy, in which case the port forwards " +
+					"are defined entirely by the `nic0` string — see `nic0_port_forwards`.",
+				MarkdownDescription: "Localhost port forwarded to the edge node (EVE-OS) TCP port 22.\n\n" +
+					"Populated when the default `nic0` is used, or when `use_gvproxy` is enabled (always on macOS). " +
+					"Null when a custom `nic0` is used on Linux without gvproxy, in which case the port forwards " +
+					"are defined entirely by the `nic0` string — see `nic0_port_forwards`.",
+				Computed: true,
+			},
+			"nic0_port_forwards": schema.StringAttribute{
+				Description: "Human-readable description of the host->guest TCP port forwards configured for `nic0`, " +
+					"e.g. `tcp/127.0.0.1:50277->:22, tcp/127.0.0.1:50278->:10022, tcp/127.0.0.1:50279->:10080`. " +
+					"Populated when the default `nic0` is used, or when gvproxy is enabled (always on macOS). " +
+					"Null when a custom `nic0` is used on Linux without gvproxy, in which case the forwards are " +
+					"defined entirely by your `nic0` string and the provider does not interpret them.",
+				MarkdownDescription: "Human-readable description of the host→guest TCP port forwards configured for `nic0`, " +
+					"e.g. `tcp/127.0.0.1:50277->:22, tcp/127.0.0.1:50278->:10022, tcp/127.0.0.1:50279->:10080`.\n\n" +
+					"Populated when the default `nic0` is used, or when `use_gvproxy` is enabled (always on macOS). " +
+					"Null when a custom `nic0` is used on Linux without gvproxy, in which case the forwards are " +
+					"defined entirely by your `nic0` string and the provider does not interpret them.",
+				Computed: true,
 			},
 			"extra_qemu_args": schema.ListAttribute{
 				Description: "Extra CLI arguments for the QEMU command used to start the edge node VM. Passed verbatim to QEMU.",
@@ -352,10 +371,29 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 
 	// Build VMConfig for the hypervisor.
-	nic0 := fmt.Sprintf(nic0Fmt, data.SSHPort.ValueInt32(),
-		data.SSHPort.ValueInt32()+1, data.SSHPort.ValueInt32()+2)
-	if !data.Nic0.IsNull() && len(data.Nic0.ValueString()) > 0 {
+	customNic0 := !data.Nic0.IsNull() && strings.TrimSpace(data.Nic0.ValueString()) != ""
+	nic0 := hypervisor.SLIRPNic0(data.SSHPort.ValueInt32())
+	if customNic0 {
 		nic0 = data.Nic0.ValueString()
+	}
+
+	// gvproxy (and the macOS vfkit backend, which always uses gvproxy) provides
+	// networking itself with a fixed set of port forwards and ignores the nic0
+	// string entirely. Warn when a custom nic0 would be silently dropped.
+	gvproxyActive := (!data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool()) || runtime.GOOS == "darwin"
+	if customNic0 && gvproxyActive {
+		reason := "use_gvproxy is set to true"
+		if runtime.GOOS == "darwin" {
+			reason = "the macOS vfkit backend always uses gvproxy"
+		}
+		resp.Diagnostics.AddWarning(
+			"Custom nic0 ignored: gvproxy is active",
+			fmt.Sprintf("The nic0 attribute is set to a custom value, but %s, so the custom nic0 "+
+				"value is ignored. gvproxy provides networking with a fixed set of host port "+
+				"forwards (to guest TCP ports 22, 10022 and 10080) and does not use the QEMU "+
+				"-nic configuration. To use the custom nic0, set use_gvproxy = false (not "+
+				"supported on macOS); otherwise remove the nic0 attribute to silence this warning.", reason),
+		)
 	}
 
 	var extraArgs []string
@@ -518,6 +556,19 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 	data.VMRunning = types.BoolValue(x)
+
+	// Populate the SSH / port-forward attributes only when the provider actually
+	// controls the forwards: the default nic0 (SLIRP hostfwd built from ssh_port)
+	// or gvproxy (forwards built from ssh_port; the nic0 string is then ignored,
+	// and vfkit on macOS always uses gvproxy). With a custom nic0 on Linux without
+	// gvproxy the nic0 string is used verbatim and ssh_port maps to nothing, so we
+	// null both attributes rather than advertise a misleading port.
+	if !customNic0 || gvproxyActive {
+		data.Nic0PortForwards = types.StringValue(hypervisor.DescribePortForwards(data.SSHPort.ValueInt32()))
+	} else {
+		data.SSHPort = types.Int32Null()
+		data.Nic0PortForwards = types.StringNull()
+	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

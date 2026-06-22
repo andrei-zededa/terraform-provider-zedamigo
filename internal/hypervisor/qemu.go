@@ -43,19 +43,8 @@ func (h *QEMUHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (strin
 	socketPath := filepath.Join(d, "gvproxy-qemu.sock")
 	pidFile := filepath.Join(d, "gvproxy.pid")
 
-	// Build comma-separated forwards string.
-	sshPort := int(conf.SSHPort)
-	forwards := []struct{ host, guest int }{
-		{sshPort, 22},
-		{sshPort + 1, 10022},
-		{sshPort + 2, 10080},
-	}
-	var fwdParts []string
-	for _, fwd := range forwards {
-		fwdParts = append(fwdParts,
-			fmt.Sprintf("0.0.0.0:%d/%s:%d", fwd.host, qemuGvproxyGuestIP, fwd.guest))
-	}
-	forwardStr := strings.Join(fwdParts, ",")
+	// Build comma-separated forwards string from the shared definition.
+	forwardStr := GvproxyForwards(conf.SSHPort, qemuGvproxyGuestIP)
 
 	args := []string{
 		"-pid-file", pidFile,

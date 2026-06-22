@@ -148,10 +148,9 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### `ssh_port` is the value. Also `serial_console_log` is all the output
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
-  name     = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus     = 2
-  cpu_pins = [16, 17]
-  mem      = "6G"
+  name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
+  cpus = 2
+  mem  = "4G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true

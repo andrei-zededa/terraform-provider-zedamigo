@@ -86,6 +86,9 @@ Valid values: `"virtio"` (default) and `"serial"`.
 - `disk_1_image` (String) Edge Node 2nd disk disk image
 - `disk_image` (String) Edge Node disk image
 - `id` (String) Edge Node (or VM) identifier
+- `nic0_port_forwards` (String) Human-readable description of the host→guest TCP port forwards configured for `nic0`, e.g. `tcp/127.0.0.1:50277->:22, tcp/127.0.0.1:50278->:10022, tcp/127.0.0.1:50279->:10080`.
+
+Populated when the default `nic0` is used, or when `use_gvproxy` is enabled (always on macOS). Null when a custom `nic0` is used on Linux without gvproxy, in which case the forwards are defined entirely by your `nic0` string and the provider does not interpret them.
 - `ovmf_vars` (String) UEFI OVMF vars file specific for this edge node
 - `qmp_socket` (String) UNIX socket for QEMU QMP for this edge node VM
 - `serial_console_log` (String) Edge Node log file of serial console output.
@@ -98,7 +101,9 @@ Valid values: `"virtio"` (default) and `"serial"`.
 **Linux (QEMU):** Populated when `serial_port_server` is `true`.
 
 **macOS (vfkit):** Always empty because vfkit does not support socket-based serial devices.
-- `ssh_port` (Number) Randomly selected port on localhost on which the EVE-OS TCP port 22 can be accessed
+- `ssh_port` (Number) Localhost port forwarded to the edge node (EVE-OS) TCP port 22.
+
+Populated when the default `nic0` is used, or when `use_gvproxy` is enabled (always on macOS). Null when a custom `nic0` is used on Linux without gvproxy, in which case the port forwards are defined entirely by the `nic0` string — see `nic0_port_forwards`.
 - `vm_running` (Boolean) Running state of the QEMU VM for this edge node
 
 <a id="nestedblock--disk"></a>
