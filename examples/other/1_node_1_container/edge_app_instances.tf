@@ -92,7 +92,7 @@ resource "zedcloud_application_instance" "APP_INSTANCES_CONTAINERS" {
   vminfo {
     cpus = 1 # zedcloud_application.CONTAINER_APP_DEF.manifest[0].resources[???].value
     mode = zedcloud_application.CONTAINER_APP_DEF.manifest[0].vmmode
-    vnc  = false
+    vnc  = true
   }
 
   interfaces {

@@ -65,7 +65,7 @@ resource "zedcloud_application" "CONTAINER_APP_DEF" {
     app_type            = "APP_TYPE_CONTAINER"
     cpu_pinning_enabled = false
     deployment_type     = "DEPLOYMENT_TYPE_STAND_ALONE"
-    enablevnc           = false
+    enablevnc           = true
     name                = "${var.DOCKERHUB_IMAGE_NAME}_container_app_${var.config_suffix}"
     vmmode              = "HV_PV"
 
