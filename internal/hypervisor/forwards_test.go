@@ -41,6 +41,10 @@ func TestGvproxyForwards(t *testing.T) {
 
 func TestDescribePortForwards(t *testing.T) {
 	is := is.New(t)
-	is.Equal(DescribePortForwards(50277),
+	// localhost (and empty) render as 127.0.0.1.
+	is.Equal(DescribePortForwards("localhost", 50277),
 		"tcp/127.0.0.1:50277->:22, tcp/127.0.0.1:50278->:10022, tcp/127.0.0.1:50279->:10080")
+	// A remote target renders its own address.
+	is.Equal(DescribePortForwards("192.168.1.10", 50277),
+		"tcp/192.168.1.10:50277->:22, tcp/192.168.1.10:50278->:10022, tcp/192.168.1.10:50279->:10080")
 }

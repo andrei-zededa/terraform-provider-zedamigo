@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -136,18 +136,18 @@ func (r *DiskImage) Create(ctx context.Context, req resource.CreateRequest, resp
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
 	i := fmt.Sprintf("%s.disk_img.qcow2", filepath.Join(d, data.Name.ValueString()))
-	res, err := cmd.Run(d, r.providerConf.QemuImg, "create", "-f", "qcow2", i,
+	res, err := r.providerConf.Exec.Run(ctx, d, r.providerConf.QemuImg, "create", "-f", "qcow2", i,
 		fmt.Sprintf("%sM", data.SizeMB.String()))
 	if err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
@@ -158,7 +158,7 @@ func (r *DiskImage) Create(ctx context.Context, req resource.CreateRequest, resp
 
 	tflog.Trace(ctx, "Disk Image Resource created succesfully")
 
-	qi, err := readDiskImage(r.providerConf, r.getResourceDir(data.ID.ValueString()),
+	qi, err := readDiskImage(ctx, r.providerConf, r.getResourceDir(data.ID.ValueString()),
 		data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
@@ -180,12 +180,12 @@ type qcowInfo struct {
 	ActualSize  int64  `json:"actual-size"`
 }
 
-func readDiskImage(providerConf *ZedAmigoProviderConfig, path, name string) (qcowInfo, error) {
+func readDiskImage(ctx context.Context, providerConf *ZedAmigoProviderConfig, path, name string) (qcowInfo, error) {
 	qi := qcowInfo{}
 
 	i := fmt.Sprintf("%s.disk_img.qcow2", filepath.Join(path, name))
 
-	res, err := cmd.Run(path, providerConf.QemuImg, "info", "--output=json", i)
+	res, err := providerConf.Exec.Run(ctx, path, providerConf.QemuImg, "info", "--output=json", i)
 	if err != nil {
 		return qi, fmt.Errorf("qemu-img command failed: %w", err)
 	}
@@ -210,7 +210,7 @@ func (r *DiskImage) Read(ctx context.Context, req resource.ReadRequest, resp *re
 		return
 	}
 
-	qi, err := readDiskImage(r.providerConf, r.getResourceDir(data.ID.ValueString()),
+	qi, err := readDiskImage(ctx, r.providerConf, r.getResourceDir(data.ID.ValueString()),
 		data.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Read Error",
@@ -246,7 +246,7 @@ func (r *DiskImage) Delete(ctx context.Context, req resource.DeleteRequest, resp
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Delete Error",
 			fmt.Sprintf("Can't delete disk image directory: %v", err))
 		return
@@ -260,14 +260,17 @@ func (r *DiskImage) ImportState(ctx context.Context, req resource.ImportStateReq
 // createTFBackPointer will create a file that points to the source directory
 // of the TF configuration that created a specific resource. This is useful for
 // finding orphaned resources created by old/no-longer-existing configs.
-func createTFBackPointer(path string) error {
+//
+// The working directory is the LOCAL Terraform config source dir (controller
+// side); only the back-pointer file is written on the target via the executor.
+func createTFBackPointer(ctx context.Context, ex exec.Executor, path string) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("createTFBackPointer: %w", err)
 	}
 
 	f := filepath.Join(path, "config_source_dir.tf")
-	if err := os.WriteFile(f, []byte("# "+wd), 0o640); err != nil {
+	if err := ex.WriteFile(ctx, f, []byte("# "+wd), 0o640); err != nil {
 		return fmt.Errorf("createTFBackPointer: %w", err)
 	}
 

@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -27,7 +27,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -285,12 +284,12 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("RADV Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("RADV Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -318,7 +317,7 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	}
 
 	confPath := filepath.Join(d, "config.yaml")
-	confFile, err := os.Create(confPath)
+	confFile, err := r.providerConf.Exec.OpenWrite(ctx, confPath, 0o644)
 	if err != nil {
 		resp.Diagnostics.AddError("RADV Resource Error",
 			fmt.Sprintf("Can't create file '%s': %s", confPath, err))
@@ -374,7 +373,7 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 
 	// Only start the daemon if state is "running"
 	if data.State.ValueString() == "running" {
-		if err := r.startRADV(d, &data); err != nil {
+		if err := r.startRADV(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("RADV Resource Error",
 				fmt.Sprintf("Failed to start RADV daemon: %v", err))
 			return
@@ -382,7 +381,7 @@ func (r *RADV) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	}
 
 	// Read the RADV current state
-	if diags, err := r.readRADV(d, &data); err != nil {
+	if diags, err := r.readRADV(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read RADV state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -403,7 +402,7 @@ func (r *RADV) Read(ctx context.Context, req resource.ReadRequest, resp *resourc
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if diags, err := r.readRADV(d, &data); err != nil {
+	if diags, err := r.readRADV(ctx, d, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
@@ -447,13 +446,13 @@ func (r *RADV) Update(ctx context.Context, req resource.UpdateRequest, resp *res
 		})
 
 		if desiredState == "running" {
-			if err := r.startRADV(d, &plan); err != nil {
+			if err := r.startRADV(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("RADV Resource Update Error",
 					fmt.Sprintf("Failed to start RADV daemon: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopRADV(d); err != nil {
+			if err := r.stopRADV(ctx, d); err != nil {
 				resp.Diagnostics.AddError("RADV Resource Update Error",
 					fmt.Sprintf("Failed to stop RADV daemon: %v", err))
 				return
@@ -463,7 +462,7 @@ func (r *RADV) Update(ctx context.Context, req resource.UpdateRequest, resp *res
 		plan.State = types.StringValue(desiredState)
 	}
 
-	if diags, err := r.readRADV(d, &plan); err != nil {
+	if diags, err := r.readRADV(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read RADV state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -482,11 +481,11 @@ func (r *RADV) Delete(ctx context.Context, req resource.DeleteRequest, resp *res
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if err := r.stopRADV(d); err != nil {
+	if err := r.stopRADV(ctx, d); err != nil {
 		tflog.Warn(ctx, "Failed to stop RADV daemon during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("RADV Resource Delete Error",
 			fmt.Sprintf("Can't delete RADV resource directory: %v", err))
 		return
@@ -497,22 +496,23 @@ func (r *RADV) ImportState(ctx context.Context, req resource.ImportStateRequest,
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *RADV) startRADV(d string, data *RADVModel) error {
-	srvCmd := os.Args[0]
+func (r *RADV) startRADV(ctx context.Context, d string, data *RADVModel) error {
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-radv", "-radv.wait", "-radv.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start RADV daemon: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
-func (r *RADV) stopRADV(d string) error {
-	running, proc, err := readRADVPID(d)
+func (r *RADV) stopRADV(ctx context.Context, d string) error {
+	running, pid, err := readRADVPID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find RADV daemon process: %w", err)
 	}
@@ -520,28 +520,14 @@ func (r *RADV) stopRADV(d string) error {
 		return nil
 	}
 
-	var killErr error
-	if r.providerConf.UseSudo {
-		killCmd := r.providerConf.Sudo
-		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
-		res, err := cmd.Run(d, killCmd, killArgs...)
-		if err != nil {
-			killErr = err
-		} else if res.ExitCode != 0 {
-			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-		}
-	} else {
-		killErr = proc.Kill()
-	}
-
-	if killErr != nil {
-		return fmt.Errorf("can't kill RADV daemon process: %w", killErr)
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("can't kill RADV daemon process: %w", err)
 	}
 	return nil
 }
 
-func (r *RADV) readRADV(resPath string, model *RADVModel) (diag.Diagnostics, error) {
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+func (r *RADV) readRADV(ctx context.Context, resPath string, model *RADVModel) (diag.Diagnostics, error) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -550,7 +536,7 @@ func (r *RADV) readRADV(resPath string, model *RADVModel) (diag.Diagnostics, err
 		desiredState = model.State.ValueString()
 	}
 
-	running, _, _ := readRADVPID(resPath)
+	running, _, _ := readRADVPID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
@@ -558,14 +544,14 @@ func (r *RADV) readRADV(resPath string, model *RADVModel) (diag.Diagnostics, err
 
 	// Self-healing: reconcile actual state with desired state.
 	if desiredState == "running" && actualState == "stopped" {
-		tflog.Info(context.Background(), "RADV daemon is stopped but should be running, restarting...")
-		if err := r.startRADV(resPath, model); err != nil {
+		tflog.Info(ctx, "RADV daemon is stopped but should be running, restarting...")
+		if err := r.startRADV(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart RADV daemon: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
-		tflog.Info(context.Background(), "RADV daemon is running but should be stopped, stopping...")
-		if err := r.stopRADV(resPath); err != nil {
+		tflog.Info(ctx, "RADV daemon is running but should be stopped, stopping...")
+		if err := r.stopRADV(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop RADV daemon: %w", err)
 		}
 		actualState = "stopped"
@@ -576,27 +562,22 @@ func (r *RADV) readRADV(resPath string, model *RADVModel) (diag.Diagnostics, err
 	return nil, nil
 }
 
-func readRADVPID(path string) (bool, *process.Process, error) {
+func readRADVPID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }

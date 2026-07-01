@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -25,12 +25,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
-	msuResDir              = "monitor_system_usage"
-	msuConfigTemplateText  = `# Monitor system usage configuration (auto-generated)
+	msuResDir             = "monitor_system_usage"
+	msuConfigTemplateText = `# Monitor system usage configuration (auto-generated)
 output_file: {{ .OutputFile }}
 interval: "{{ .Interval }}"
 flush_every_n: {{ .FlushEveryN }}
@@ -204,12 +203,12 @@ func (r *MonitorSystemUsage) Create(ctx context.Context, req resource.CreateRequ
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("MonitorSystemUsage Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("MonitorSystemUsage Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -229,7 +228,7 @@ func (r *MonitorSystemUsage) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	confPath := filepath.Join(d, "config.yaml")
-	if err := writeMSUConfig(confPath, &data, namespaces); err != nil {
+	if err := writeMSUConfig(ctx, r.providerConf.Exec, confPath, &data, namespaces); err != nil {
 		resp.Diagnostics.AddError("MonitorSystemUsage Resource Error",
 			fmt.Sprintf("Unable to write config file: %s", err))
 		return
@@ -244,14 +243,14 @@ func (r *MonitorSystemUsage) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	if data.State.ValueString() == "running" {
-		if err := r.startMonitorSystemUsage(d, &data); err != nil {
+		if err := r.startMonitorSystemUsage(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("MonitorSystemUsage Resource Error",
 				fmt.Sprintf("Failed to start monitor-system-usage daemon: %v", err))
 			return
 		}
 	}
 
-	if diags, err := r.readMonitorSystemUsage(d, &data); err != nil {
+	if diags, err := r.readMonitorSystemUsage(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read MonitorSystemUsage state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -272,7 +271,7 @@ func (r *MonitorSystemUsage) Read(ctx context.Context, req resource.ReadRequest,
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if diags, err := r.readMonitorSystemUsage(d, &data); err != nil {
+	if diags, err := r.readMonitorSystemUsage(ctx, d, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
@@ -326,13 +325,13 @@ func (r *MonitorSystemUsage) Update(ctx context.Context, req resource.UpdateRequ
 		})
 
 		if desiredState == "running" {
-			if err := r.startMonitorSystemUsage(d, &plan); err != nil {
+			if err := r.startMonitorSystemUsage(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("MonitorSystemUsage Resource Update Error",
 					fmt.Sprintf("Failed to start monitor-system-usage daemon: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopMonitorSystemUsage(d); err != nil {
+			if err := r.stopMonitorSystemUsage(ctx, d); err != nil {
 				resp.Diagnostics.AddError("MonitorSystemUsage Resource Update Error",
 					fmt.Sprintf("Failed to stop monitor-system-usage daemon: %v", err))
 				return
@@ -342,7 +341,7 @@ func (r *MonitorSystemUsage) Update(ctx context.Context, req resource.UpdateRequ
 		plan.State = types.StringValue(desiredState)
 	}
 
-	if diags, err := r.readMonitorSystemUsage(d, &plan); err != nil {
+	if diags, err := r.readMonitorSystemUsage(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read MonitorSystemUsage state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -361,11 +360,11 @@ func (r *MonitorSystemUsage) Delete(ctx context.Context, req resource.DeleteRequ
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if err := r.stopMonitorSystemUsage(d); err != nil {
+	if err := r.stopMonitorSystemUsage(ctx, d); err != nil {
 		tflog.Warn(ctx, "Failed to stop monitor-system-usage daemon during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("MonitorSystemUsage Resource Delete Error",
 			fmt.Sprintf("Can't delete MonitorSystemUsage resource directory: %v", err))
 		return
@@ -376,35 +375,36 @@ func (r *MonitorSystemUsage) ImportState(ctx context.Context, req resource.Impor
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *MonitorSystemUsage) startMonitorSystemUsage(d string, data *MonitorSystemUsageModel) error {
+func (r *MonitorSystemUsage) startMonitorSystemUsage(ctx context.Context, d string, data *MonitorSystemUsageModel) error {
 	netns := ""
 	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
 		netns = data.NetNS.ValueString()
 	}
 
-	srvCmd := os.Args[0]
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if netns != "" {
 		if r.providerConf.UseSudo {
 			srvCmd = r.providerConf.Sudo
-			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, self}
 		} else {
 			srvCmd = r.providerConf.IP
-			srvArgs = []string{"netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"netns", "exec", netns, self}
 		}
 	} else if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-monitor-system-usage", "-msu.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start monitor-system-usage daemon: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
-func (r *MonitorSystemUsage) stopMonitorSystemUsage(d string) error {
-	running, proc, err := readMonitorSystemUsagePID(d)
+func (r *MonitorSystemUsage) stopMonitorSystemUsage(ctx context.Context, d string) error {
+	running, pid, err := readMonitorSystemUsagePID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find monitor-system-usage daemon process: %w", err)
 	}
@@ -412,28 +412,14 @@ func (r *MonitorSystemUsage) stopMonitorSystemUsage(d string) error {
 		return nil
 	}
 
-	var killErr error
-	if r.providerConf.UseSudo {
-		killCmd := r.providerConf.Sudo
-		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
-		res, err := cmd.Run(d, killCmd, killArgs...)
-		if err != nil {
-			killErr = err
-		} else if res.ExitCode != 0 {
-			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-		}
-	} else {
-		killErr = proc.Kill()
-	}
-
-	if killErr != nil {
-		return fmt.Errorf("can't kill monitor-system-usage daemon process: %w", killErr)
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("can't kill monitor-system-usage daemon process: %w", err)
 	}
 	return nil
 }
 
-func (r *MonitorSystemUsage) readMonitorSystemUsage(resPath string, model *MonitorSystemUsageModel) (diag.Diagnostics, error) {
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+func (r *MonitorSystemUsage) readMonitorSystemUsage(ctx context.Context, resPath string, model *MonitorSystemUsageModel) (diag.Diagnostics, error) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -442,21 +428,21 @@ func (r *MonitorSystemUsage) readMonitorSystemUsage(resPath string, model *Monit
 		desiredState = model.State.ValueString()
 	}
 
-	running, _, _ := readMonitorSystemUsagePID(resPath)
+	running, _, _ := readMonitorSystemUsagePID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
 	}
 
 	if desiredState == "running" && actualState == "stopped" {
-		tflog.Info(context.Background(), "Monitor system usage daemon is stopped but should be running, restarting...")
-		if err := r.startMonitorSystemUsage(resPath, model); err != nil {
+		tflog.Info(ctx, "Monitor system usage daemon is stopped but should be running, restarting...")
+		if err := r.startMonitorSystemUsage(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart monitor-system-usage daemon: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
-		tflog.Info(context.Background(), "Monitor system usage daemon is running but should be stopped, stopping...")
-		if err := r.stopMonitorSystemUsage(resPath); err != nil {
+		tflog.Info(ctx, "Monitor system usage daemon is running but should be stopped, stopping...")
+		if err := r.stopMonitorSystemUsage(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop monitor-system-usage daemon: %w", err)
 		}
 		actualState = "stopped"
@@ -467,38 +453,33 @@ func (r *MonitorSystemUsage) readMonitorSystemUsage(resPath string, model *Monit
 	return nil, nil
 }
 
-func readMonitorSystemUsagePID(path string) (bool, *process.Process, error) {
+func readMonitorSystemUsagePID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }
 
-func writeMSUConfig(confPath string, data *MonitorSystemUsageModel, namespaces []string) error {
+func writeMSUConfig(ctx context.Context, ex exec.Executor, confPath string, data *MonitorSystemUsageModel, namespaces []string) error {
 	tmpl, err := template.New("msu-config").Parse(msuConfigTemplateText)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
 	}
 
-	confFile, err := os.Create(confPath)
+	confFile, err := ex.OpenWrite(ctx, confPath, 0o644)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", confPath, err)
 	}

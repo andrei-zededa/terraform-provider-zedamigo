@@ -10,6 +10,7 @@ require (
 	github.com/coredhcp/coredhcp v0.0.0-20260217182248-a0841cb3038f
 	github.com/crc-org/vfkit v0.6.3
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
+	github.com/gliderlabs/ssh v0.3.8
 	github.com/google/go-tpm-tools v0.4.8
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
@@ -19,10 +20,12 @@ require (
 	github.com/matryer/is v1.4.1
 	github.com/mdlayher/ndp v1.1.0
 	github.com/miekg/dns v1.1.72
+	github.com/pkg/sftp v1.13.10
 	github.com/prometheus-community/pro-bing v0.8.0
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/sirupsen/logrus v1.9.4
 	github.com/vishvananda/netlink v1.3.1
+	golang.org/x/crypto v0.51.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -37,6 +40,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
+	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/apparentlymart/go-cidr v1.1.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/armon/go-radix v1.0.0 // indirect
@@ -90,6 +94,7 @@ require (
 	github.com/imdario/mergo v0.3.15 // indirect
 	github.com/inetaf/tcpproxy v0.0.0-20260515195445-c159a6051109 // indirect
 	github.com/insomniacslk/dhcp v0.0.0-20260407060928-11b94ed970f2 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/linuxkit/virtsock v0.0.0-20241009230534-cb6a20cc0422 // indirect
 	github.com/lmittmann/tint v1.1.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
@@ -136,7 +141,6 @@ require (
 	go.abhg.dev/goldmark/frontmatter v0.2.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.54.0 // indirect

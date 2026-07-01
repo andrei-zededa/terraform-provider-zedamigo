@@ -66,13 +66,19 @@ func GvproxyForwards(sshPort int32, guestIP string) string {
 // DescribePortForwards returns a human-readable, one-line description of the
 // standard host->guest TCP port forwards configured for the default nic0, e.g.
 // "tcp/127.0.0.1:50277->:22, tcp/127.0.0.1:50278->:10022, tcp/127.0.0.1:50279->:10080".
-// The host is shown as 127.0.0.1 (the address used to reach the forward); the
-// guest IP is omitted because it differs by networking backend (SLIRP DHCP vs
-// gvproxy 192.168.127.2) and is irrelevant from the host's point of view.
-func DescribePortForwards(sshPort int32) string {
+// host is the address at which the forwards are reachable: for a local target
+// that is 127.0.0.1; for a remote (SSH) target the forwards bind on the remote
+// host, so its address is shown (reach them at <host>:<port> from elsewhere, or
+// tunnel with your own `ssh -L`). The guest IP is omitted because it differs by
+// networking backend (SLIRP DHCP vs gvproxy 192.168.127.2) and is irrelevant
+// from the host's point of view.
+func DescribePortForwards(host string, sshPort int32) string {
+	if host == "" || host == "localhost" {
+		host = "127.0.0.1"
+	}
 	parts := make([]string, 0, len(StandardForwards))
 	for _, f := range StandardForwards {
-		parts = append(parts, fmt.Sprintf("tcp/127.0.0.1:%d->:%d", int(sshPort)+f.HostOffset, f.GuestPort))
+		parts = append(parts, fmt.Sprintf("tcp/%s:%d->:%d", host, int(sshPort)+f.HostOffset, f.GuestPort))
 	}
 	return strings.Join(parts, ", ")
 }

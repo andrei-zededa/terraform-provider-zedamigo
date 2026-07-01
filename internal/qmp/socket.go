@@ -53,16 +53,17 @@ type SocketMonitor struct {
 	events    <-chan Event
 }
 
-// NewSocketMonitor configures a connection to the provided QEMU monitor socket.
-// An error is returned if the socket cannot be successfully dialed, or the
-// dial attempt times out.
-//
-// NewSocketMonitor may dial the QEMU socket using a variety of connection types:
-//
-//	NewSocketMonitor("unix", "/var/lib/qemu/example.monitor", 2 * time.Second)
-//	NewSocketMonitor("tcp", "8.8.8.8:4444", 2 * time.Second)
-func NewSocketMonitor(network, addr string, timeout time.Duration) (*SocketMonitor, error) {
-	c, err := net.DialTimeout(network, addr, timeout)
+// DialFunc dials a socket and returns the connection. It allows callers to
+// inject a transport — e.g. a plain net.Dialer for a local socket, or SSH
+// streamlocal forwarding to reach a UNIX socket on a remote host.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// NewSocketMonitorWithDialer configures a connection to the provided QEMU
+// monitor socket using the supplied dialer. This is the variant used by the
+// provider so that the QMP socket can be reached either locally or, when the
+// provider operates against a remote host, tunneled over SSH.
+func NewSocketMonitorWithDialer(ctx context.Context, network, addr string, dial DialFunc) (*SocketMonitor, error) {
+	c, err := dial(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +74,22 @@ func NewSocketMonitor(network, addr string, timeout time.Duration) (*SocketMonit
 	}
 
 	return mon, nil
+}
+
+// NewSocketMonitor configures a connection to the provided QEMU monitor socket.
+// An error is returned if the socket cannot be successfully dialed, or the
+// dial attempt times out.
+//
+// NewSocketMonitor may dial the QEMU socket using a variety of connection types:
+//
+//	NewSocketMonitor("unix", "/var/lib/qemu/example.monitor", 2 * time.Second)
+//	NewSocketMonitor("tcp", "8.8.8.8:4444", 2 * time.Second)
+func NewSocketMonitor(network, addr string, timeout time.Duration) (*SocketMonitor, error) {
+	return NewSocketMonitorWithDialer(context.Background(), network, addr,
+		func(ctx context.Context, n, a string) (net.Conn, error) {
+			d := net.Dialer{Timeout: timeout}
+			return d.DialContext(ctx, n, a)
+		})
 }
 
 // Listen creates a new SocketMonitor listening for a single connection to the provided socket file or address.

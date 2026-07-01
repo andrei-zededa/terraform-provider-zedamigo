@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -260,12 +259,12 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -280,7 +279,7 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 
 	leasesPath := filepath.Join(d, "leases.sqlite3")
 	confPath := filepath.Join(d, "config.yaml")
-	confFile, err := os.Create(confPath)
+	confFile, err := r.providerConf.Exec.OpenWrite(ctx, confPath, 0o644)
 	if err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Error",
 			fmt.Sprintf("Can't create file '%s': %s", confPath, err))
@@ -344,7 +343,7 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 
 	// Only start the daemon if state is "running"
 	if data.State.ValueString() == "running" {
-		if err := r.startDHCPServer(d, &data); err != nil {
+		if err := r.startDHCPServer(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("DHCPServer Resource Error",
 				fmt.Sprintf("Failed to start DHCP server: %v", err))
 			return
@@ -352,7 +351,7 @@ func (r *DHCPServer) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	// Read the DHCPServer current state.
-	if diags, err := r.readDHCPServer(d, &data); err != nil {
+	if diags, err := r.readDHCPServer(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read DHCPServer state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -376,7 +375,7 @@ func (r *DHCPServer) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Read the DHCPServer current state.
-	if diags, err := r.readDHCPServer(d, &data); err != nil {
+	if diags, err := r.readDHCPServer(ctx, d, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
@@ -441,13 +440,13 @@ func (r *DHCPServer) Update(ctx context.Context, req resource.UpdateRequest, res
 		})
 
 		if desiredState == "running" {
-			if err := r.startDHCPServer(d, &plan); err != nil {
+			if err := r.startDHCPServer(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("DHCPServer Resource Update Error",
 					fmt.Sprintf("Failed to start DHCP server: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopDHCPServer(d); err != nil {
+			if err := r.stopDHCPServer(ctx, d); err != nil {
 				resp.Diagnostics.AddError("DHCPServer Resource Update Error",
 					fmt.Sprintf("Failed to stop DHCP server: %v", err))
 				return
@@ -458,7 +457,7 @@ func (r *DHCPServer) Update(ctx context.Context, req resource.UpdateRequest, res
 	}
 
 	// Read back the current state to verify
-	if diags, err := r.readDHCPServer(d, &plan); err != nil {
+	if diags, err := r.readDHCPServer(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read DHCPServer state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -480,12 +479,12 @@ func (r *DHCPServer) Delete(ctx context.Context, req resource.DeleteRequest, res
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Stop the DHCP server process if it's running.
-	if err := r.stopDHCPServer(d); err != nil {
+	if err := r.stopDHCPServer(ctx, d); err != nil {
 		// Log as warning instead of error, since the daemon might already be stopped
 		tflog.Warn(ctx, "Failed to stop DHCP server during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("DHCPServer Resource Delete Error",
 			fmt.Sprintf("Can't delete DHCPServer resource directory: %v", err))
 		return
@@ -499,38 +498,39 @@ func (r *DHCPServer) ImportState(ctx context.Context, req resource.ImportStateRe
 // startDHCPServer starts the DHCP server daemon for the given resource.
 // When netns is set, the daemon is started inside the network namespace using
 // `ip netns exec <ns>`.
-func (r *DHCPServer) startDHCPServer(d string, data *DHCPServerModel) error {
+func (r *DHCPServer) startDHCPServer(ctx context.Context, d string, data *DHCPServerModel) error {
 	netns := ""
 	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
 		netns = data.NetNS.ValueString()
 	}
 
-	srvCmd := os.Args[0]
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if netns != "" {
 		// Wrap with: ip netns exec <ns> <binary> ...
 		// or: sudo -n ip netns exec <ns> <binary> ...
 		if r.providerConf.UseSudo {
 			srvCmd = r.providerConf.Sudo
-			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, self}
 		} else {
 			srvCmd = r.providerConf.IP
-			srvArgs = []string{"netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"netns", "exec", netns, self}
 		}
 	} else if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-dhcp-server", "-ds.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start DHCP server: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
 // stopDHCPServer stops the DHCP server daemon for the given resource
-func (r *DHCPServer) stopDHCPServer(d string) error {
-	running, proc, err := readDHCPServerPID(d)
+func (r *DHCPServer) stopDHCPServer(ctx context.Context, d string) error {
+	running, pid, err := readDHCPServerPID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find DHCP server process: %w", err)
 	}
@@ -538,30 +538,15 @@ func (r *DHCPServer) stopDHCPServer(d string) error {
 		return nil // Already stopped
 	}
 
-	var killErr error
-	if r.providerConf.UseSudo {
-		// Process was started with sudo, so we need sudo to kill it.
-		killCmd := r.providerConf.Sudo
-		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
-		res, err := cmd.Run(d, killCmd, killArgs...)
-		if err != nil {
-			killErr = err
-		} else if res.ExitCode != 0 {
-			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-		}
-	} else {
-		killErr = proc.Kill()
-	}
-
-	if killErr != nil {
-		return fmt.Errorf("can't kill DHCP server process: %w", killErr)
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("can't kill DHCP server process: %w", err)
 	}
 	return nil
 }
 
-func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (diag.Diagnostics, error) {
+func (r *DHCPServer) readDHCPServer(ctx context.Context, resPath string, model *DHCPServerModel) (diag.Diagnostics, error) {
 	// Check if resource directory exists
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -572,7 +557,7 @@ func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (dia
 	}
 
 	// Check if daemon is actually running
-	running, _, _ := readDHCPServerPID(resPath)
+	running, _, _ := readDHCPServerPID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
@@ -581,15 +566,15 @@ func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (dia
 	// Self-healing: reconcile actual state with desired state
 	if desiredState == "running" && actualState == "stopped" {
 		// Daemon should be running but isn't - restart it
-		tflog.Info(context.Background(), "DHCP server daemon is stopped but should be running, restarting...")
-		if err := r.startDHCPServer(resPath, model); err != nil {
+		tflog.Info(ctx, "DHCP server daemon is stopped but should be running, restarting...")
+		if err := r.startDHCPServer(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart DHCP server: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
 		// Daemon should be stopped but is running - stop it
-		tflog.Info(context.Background(), "DHCP server daemon is running but should be stopped, stopping...")
-		if err := r.stopDHCPServer(resPath); err != nil {
+		tflog.Info(ctx, "DHCP server daemon is running but should be stopped, stopping...")
+		if err := r.stopDHCPServer(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop DHCP server: %w", err)
 		}
 		actualState = "stopped"
@@ -601,29 +586,24 @@ func (r *DHCPServer) readDHCPServer(resPath string, model *DHCPServerModel) (dia
 	return nil, nil
 }
 
-func readDHCPServerPID(path string) (bool, *process.Process, error) {
+func readDHCPServerPID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }
 
 func equalStaticRoutes(a, b []DHCPStaticRouteModel) bool {

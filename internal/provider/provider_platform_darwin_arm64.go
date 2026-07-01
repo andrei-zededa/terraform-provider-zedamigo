@@ -7,7 +7,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os/exec"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -15,7 +14,7 @@ import (
 
 func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
 	// Look up vfkit.
-	vfkit, err := exec.LookPath("vfkit")
+	vfkit, err := zaConf.Exec.LookPath(ctx, "vfkit")
 	if err != nil {
 		resp.Diagnostics.AddError("Can't find the `vfkit` executable.",
 			fmt.Sprintf("Can't find the `vfkit` executable. Install via: brew install vfkit. Got error: %v", err))
@@ -23,7 +22,7 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 	}
 
 	// qemu-img is needed for format conversion (qcow2 -> raw).
-	qi, err := exec.LookPath("qemu-img")
+	qi, err := zaConf.Exec.LookPath(ctx, "qemu-img")
 	if err != nil {
 		resp.Diagnostics.AddError("Can't find the `qemu-img` executable.",
 			fmt.Sprintf("Can't find the `qemu-img` executable. Install via: brew install qemu. Got error: %v", err))
@@ -33,7 +32,7 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 	zaConf.QemuImg = qi
 
 	// swtpm (optional).
-	st, err := exec.LookPath("swtpm")
+	st, err := zaConf.Exec.LookPath(ctx, "swtpm")
 	if err != nil {
 		resp.Diagnostics.AddWarning("Can't find the `swtpm` executable.",
 			fmt.Sprintf("This warning can be ignored if you DO NOT use the SwTPM resource. Can't find `swtpm`, got error: %v", err))
@@ -44,7 +43,7 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 	zaConf.Swtpm = st
 
 	// genisoimage (optional).
-	gencmd, err := exec.LookPath("genisoimage")
+	gencmd, err := zaConf.Exec.LookPath(ctx, "genisoimage")
 	if err != nil {
 		resp.Diagnostics.AddWarning("Can't find the `genisoimage` executable.",
 			fmt.Sprintf("This warning can be ignored if you DO NOT use the Cloud Init ISO resource. Can't find `genisoimage`, got error: %v", err))

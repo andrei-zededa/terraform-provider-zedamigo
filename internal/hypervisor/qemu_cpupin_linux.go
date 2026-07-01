@@ -7,26 +7,25 @@ package hypervisor
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// getCPUThreadIDs reads /proc filesystem to find QEMU vCPU thread IDs.
-// Returns a map[cpuNum]threadID for threads named "CPU N/KVM".
-func getCPUThreadIDs(qemuPID int, numCPUs int) (map[int]int, error) {
-	return getCPUThreadIDsFromDir(fmt.Sprintf("/proc/%d/task", qemuPID), numCPUs)
+// getCPUThreadIDs reads the target's /proc filesystem to find QEMU vCPU thread
+// IDs. Returns a map[cpuNum]threadID for threads named "CPU N/KVM".
+func getCPUThreadIDs(ctx context.Context, ex exec.Executor, qemuPID int, numCPUs int) (map[int]int, error) {
+	return getCPUThreadIDsFromDir(ctx, ex, fmt.Sprintf("/proc/%d/task", qemuPID), numCPUs)
 }
 
 // getCPUThreadIDsFromDir scans a task directory for QEMU vCPU threads.
 // Extracted for testability — accepts an arbitrary directory path.
-func getCPUThreadIDsFromDir(taskDir string, numCPUs int) (map[int]int, error) {
-	entries, err := os.ReadDir(taskDir)
+func getCPUThreadIDsFromDir(ctx context.Context, ex exec.Executor, taskDir string, numCPUs int) (map[int]int, error) {
+	entries, err := ex.ReadDir(ctx, taskDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read task directory: %w", err)
 	}
@@ -37,7 +36,7 @@ func getCPUThreadIDsFromDir(taskDir string, numCPUs int) (map[int]int, error) {
 		tid := entry.Name()
 		commPath := filepath.Join(taskDir, tid, "comm")
 
-		commBytes, err := os.ReadFile(commPath)
+		commBytes, err := ex.ReadFile(ctx, commPath)
 		if err != nil {
 			continue // Thread may have exited
 		}
@@ -79,7 +78,7 @@ func pinCPUThreads(ctx context.Context, h *QEMUHypervisor, qemuPID int, cpuPins 
 	var cpuThreads map[int]int
 	var err error
 	for i := 0; i < 10; i++ {
-		cpuThreads, err = getCPUThreadIDs(qemuPID, numCPUs)
+		cpuThreads, err = getCPUThreadIDs(ctx, h.Exec, qemuPID, numCPUs)
 		if err == nil {
 			break
 		}
@@ -110,9 +109,9 @@ func pinCPUThreads(ctx context.Context, h *QEMUHypervisor, qemuPID int, cpuPins 
 
 		if h.UseSudo {
 			args := append([]string{h.TasksetPath}, tasksetArgs...)
-			_, err = cmd.Run(logPath, h.SudoPath, args...)
+			_, err = h.Exec.Run(ctx, logPath, h.SudoPath, args...)
 		} else {
-			_, err = cmd.Run(logPath, h.TasksetPath, tasksetArgs...)
+			_, err = h.Exec.Run(ctx, logPath, h.TasksetPath, tasksetArgs...)
 		}
 
 		if err != nil {

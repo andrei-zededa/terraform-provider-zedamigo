@@ -6,13 +6,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
@@ -279,12 +277,12 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("LAG Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("LAG Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -312,7 +310,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.XmitHashPolicy.IsNull() && !data.XmitHashPolicy.IsUnknown() {
 		moreArgs = append(moreArgs, "xmit_hash_policy", data.XmitHashPolicy.ValueString())
 	}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("LAG Resource Error",
 			"Unable to create a new bond.")
@@ -324,7 +322,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.MTU.IsNull() && !data.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", data.MTU.ValueInt64())
 		moreArgs := []string{"link", "set", "dev", bond, "mtu", mtu}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to set bond MTU.")
@@ -338,7 +336,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.MACAddress.IsNull() && !data.MACAddress.IsUnknown() {
 		macAddr := data.MACAddress.ValueString()
 		moreArgs := []string{"link", "set", "dev", bond, "address", macAddr}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to set MAC address for bond.")
@@ -356,7 +354,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		}
 
 		for _, intf := range ifaces {
-			if diags, err := r.enslaveMember(d, ipCmd, ipArgs, bond, intf); err != nil {
+			if diags, err := r.enslaveMember(ctx, d, ipCmd, ipArgs, bond, intf); err != nil {
 				resp.Diagnostics.AddError("LAG Resource Error", err.Error())
 				resp.Diagnostics.Append(diags...)
 				return
@@ -376,7 +374,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", bond}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to configure bond IPv4 address.")
@@ -397,7 +395,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", bond}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to configure bond IPv6 address.")
@@ -411,7 +409,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.State.IsNull() && !data.State.IsUnknown() {
 		state := data.State.ValueString()
 		moreArgs := []string{"link", "set", "dev", bond, state}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to set bond state.")
@@ -421,7 +419,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	}
 
 	// Read the bond current state.
-	if diags, err := r.readLAG(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readLAG(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read bond state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -438,7 +436,7 @@ func (r *LAG) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 			return
 		}
 		moreArgs := []string{"addr", "add", fmt.Sprintf("%s/64", ll.String()), "scope", "link", "dev", bond}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Error",
 				"Unable to configure bond link-local address.")
@@ -471,7 +469,7 @@ func (r *LAG) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 	ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
 
 	// Read the bond current state.
-	if diags, err := r.readLAG(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readLAG(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		// Check for various error messages that indicate the device doesn't exist.
 		if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 			// Resource was deleted outside Terraform: remove from state.
@@ -514,7 +512,7 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 	if !plan.MTU.Equal(state.MTU) && !plan.MTU.IsNull() && !plan.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", plan.MTU.ValueInt64())
 		moreArgs := []string{"link", "set", "dev", bond, "mtu", mtu}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Update Error", "Unable to set bond MTU.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
@@ -525,7 +523,7 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 	// MAC address.
 	if !plan.MACAddress.Equal(state.MACAddress) && !plan.MACAddress.IsNull() && !plan.MACAddress.IsUnknown() {
 		moreArgs := []string{"link", "set", "dev", bond, "address", plan.MACAddress.ValueString()}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Update Error", "Unable to set bond MAC address.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
@@ -535,14 +533,14 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 
 	// IPv4 / IPv6 addresses (del old, add new).
 	if !plan.IPv4Address.Equal(state.IPv4Address) {
-		if diags, err := r.reconcileAddr(d, ipCmd, ipArgs, bond, state.IPv4Address, plan.IPv4Address); err != nil {
+		if diags, err := r.reconcileAddr(ctx, d, ipCmd, ipArgs, bond, state.IPv4Address, plan.IPv4Address); err != nil {
 			resp.Diagnostics.AddError("LAG Resource Update Error", err.Error())
 			resp.Diagnostics.Append(diags...)
 			return
 		}
 	}
 	if !plan.IPv6Address.Equal(state.IPv6Address) {
-		if diags, err := r.reconcileAddr(d, ipCmd, ipArgs, bond, state.IPv6Address, plan.IPv6Address); err != nil {
+		if diags, err := r.reconcileAddr(ctx, d, ipCmd, ipArgs, bond, state.IPv6Address, plan.IPv6Address); err != nil {
 			resp.Diagnostics.AddError("LAG Resource Update Error", err.Error())
 			resp.Diagnostics.Append(diags...)
 			return
@@ -562,14 +560,14 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 		// Release members we no longer manage first, then enslave new ones, to
 		// avoid transient "already has a master" errors when an interface moves.
 		for _, intf := range stringsDifference(stateMembers, planMembers) {
-			if diags, err := r.releaseMember(d, ipCmd, ipArgs, intf); err != nil {
+			if diags, err := r.releaseMember(ctx, d, ipCmd, ipArgs, intf); err != nil {
 				resp.Diagnostics.AddError("LAG Resource Update Error", err.Error())
 				resp.Diagnostics.Append(diags...)
 				return
 			}
 		}
 		for _, intf := range stringsDifference(planMembers, stateMembers) {
-			if diags, err := r.enslaveMember(d, ipCmd, ipArgs, bond, intf); err != nil {
+			if diags, err := r.enslaveMember(ctx, d, ipCmd, ipArgs, bond, intf); err != nil {
 				resp.Diagnostics.AddError("LAG Resource Update Error", err.Error())
 				resp.Diagnostics.Append(diags...)
 				return
@@ -580,7 +578,7 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 	// State last, after members are attached.
 	if !plan.State.Equal(state.State) && !plan.State.IsNull() && !plan.State.IsUnknown() {
 		moreArgs := []string{"link", "set", "dev", bond, plan.State.ValueString()}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("LAG Resource Update Error", "Unable to set bond state.")
 			resp.Diagnostics.Append(res.Diagnostics()...)
@@ -590,7 +588,7 @@ func (r *LAG) Update(ctx context.Context, req resource.UpdateRequest, resp *reso
 
 	// Read back the current state so all Computed attributes (and the reconciled
 	// member set) are concrete before we save.
-	if diags, err := r.readLAG(d, ipCmd, ipArgs, &plan); err != nil {
+	if diags, err := r.readLAG(ctx, d, ipCmd, ipArgs, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read bond state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -620,7 +618,7 @@ func (r *LAG) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	// Delete the bond. Deleting the master automatically releases its members,
 	// so there is no need to `nomaster` them first.
 	moreArgs := []string{"link", "delete", bond, "type", "bond"}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		// If the device doesn't exist, the delete is successful (idempotent).
 		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
@@ -631,7 +629,7 @@ func (r *LAG) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("LAG Resource Delete Error",
 			fmt.Sprintf("Can't delete LAG resource directory: %v", err))
 		return
@@ -645,21 +643,21 @@ func (r *LAG) ImportState(ctx context.Context, req resource.ImportStateRequest, 
 // enslaveMember attaches intf as a member of bond. Bond slaves must be
 // administratively DOWN at the moment they are enslaved, so we force them down
 // first, then bring them back up.
-func (r *LAG) enslaveMember(resPath string, ipCmd string, ipArgs []string, bond, intf string) (diag.Diagnostics, error) {
+func (r *LAG) enslaveMember(ctx context.Context, resPath string, ipCmd string, ipArgs []string, bond, intf string) (diag.Diagnostics, error) {
 	moreArgs := []string{"link", "set", "dev", intf, "down"}
-	if res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
 		return res.Diagnostics(),
 			fmt.Errorf("can't set member '%s' down before enslaving to bond '%s': %w", intf, bond, err)
 	}
 
 	moreArgs = []string{"link", "set", "dev", intf, "master", bond}
-	if res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
 		return res.Diagnostics(),
 			fmt.Errorf("can't enslave member '%s' to bond '%s': %w", intf, bond, err)
 	}
 
 	moreArgs = []string{"link", "set", "dev", intf, "up"}
-	if res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...); err != nil {
 		return res.Diagnostics(),
 			fmt.Errorf("can't bring enslaved member '%s' up: %w", intf, err)
 	}
@@ -669,9 +667,9 @@ func (r *LAG) enslaveMember(resPath string, ipCmd string, ipArgs []string, bond,
 
 // releaseMember detaches intf from its bond. A member that has already been
 // removed (e.g. externally) is treated as success.
-func (r *LAG) releaseMember(resPath string, ipCmd string, ipArgs []string, intf string) (diag.Diagnostics, error) {
+func (r *LAG) releaseMember(ctx context.Context, resPath string, ipCmd string, ipArgs []string, intf string) (diag.Diagnostics, error) {
 	moreArgs := []string{"link", "set", "dev", intf, "nomaster"}
-	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
 			errchecker.DiagsNone(res.Diagnostics(), intfNotFoundStrs) {
@@ -685,10 +683,10 @@ func (r *LAG) releaseMember(resPath string, ipCmd string, ipArgs []string, intf 
 // reconcileAddr brings the address configured on bond from old to new. There is
 // no iproute2 "replace" verb, so a changed address is removed and re-added;
 // without the explicit delete both addresses would linger.
-func (r *LAG) reconcileAddr(resPath string, ipCmd string, ipArgs []string, bond string, old, new types.String) (diag.Diagnostics, error) {
+func (r *LAG) reconcileAddr(ctx context.Context, resPath string, ipCmd string, ipArgs []string, bond string, old, new types.String) (diag.Diagnostics, error) {
 	if !old.IsNull() && !old.IsUnknown() {
 		moreArgs := []string{"addr", "del", old.ValueString(), "dev", bond}
-		res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			tolerable := append(append([]string{}, intfNotFoundStrs...), addrNotFoundStrs...)
 			if errchecker.ContainsNone(err, tolerable) &&
@@ -708,7 +706,7 @@ func (r *LAG) reconcileAddr(resPath string, ipCmd string, ipArgs []string, bond 
 			return dgs, fmt.Errorf("invalid address '%s' for bond '%s': %w", addr, bond, err)
 		}
 		moreArgs := []string{"addr", "add", addr, "dev", bond}
-		res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			return res.Diagnostics(),
 				fmt.Errorf("can't add address '%s' to bond '%s': %w", addr, bond, err)
@@ -718,12 +716,12 @@ func (r *LAG) reconcileAddr(resPath string, ipCmd string, ipArgs []string, bond 
 	return nil, nil
 }
 
-func (r *LAG) readLAG(resPath string, ipCmd string, ipArgs []string, model *LAGModel) (diag.Diagnostics, error) {
+func (r *LAG) readLAG(ctx context.Context, resPath string, ipCmd string, ipArgs []string, model *LAGModel) (diag.Diagnostics, error) {
 	bond := model.Name.ValueString()
 
 	// Check if the bond exists and get info.
 	moreArgs := []string{"link", "show", bond}
-	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve bond '%s' details: %w", bond, err)
 	}
@@ -767,7 +765,7 @@ func (r *LAG) readLAG(resPath string, ipCmd string, ipArgs []string, model *LAGM
 
 	// Get IP address(es) of the bond.
 	moreArgs = []string{"addr", "show", bond}
-	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve bond '%s' addresses: %w", bond, err)
 	}
@@ -811,7 +809,7 @@ func (r *LAG) readLAG(resPath string, ipCmd string, ipArgs []string, model *LAGM
 		model.EnslavedInterfaces = types.SetNull(types.StringType)
 	} else {
 		moreArgs = []string{"link", "show", "master", bond}
-		res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			return res.Diagnostics(), fmt.Errorf("can't retrieve bond '%s' members: %w", bond, err)
 		}

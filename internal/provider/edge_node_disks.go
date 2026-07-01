@@ -5,8 +5,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -125,7 +125,7 @@ func diskImagePath(paths []string, i int) string {
 // buildDisks translates either the `disk` blocks or the legacy flat attributes
 // into the ordered []hypervisor.DiskConfig consumed by the hypervisor layer,
 // applying defaults and validation. Index 0 is disk0, index 1 is disk1.
-func buildDisks(ctx context.Context, blocks []DiskBlockModel, legacy legacyDiskAttrs) ([]hypervisor.DiskConfig, diag.Diagnostics) {
+func buildDisks(ctx context.Context, ex exec.Executor, blocks []DiskBlockModel, legacy legacyDiskAttrs) ([]hypervisor.DiskConfig, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	legacyDisk0 := !legacy.DiskImageBase.IsNull() && legacy.DiskImageBase.ValueString() != ""
@@ -144,7 +144,7 @@ func buildDisks(ctx context.Context, blocks []DiskBlockModel, legacy legacyDiskA
 	if blocksUsed {
 		disks := make([]hypervisor.DiskConfig, 0, len(blocks))
 		for i, b := range blocks {
-			dc, dcDiags := diskConfigFromBlock(ctx, i, b)
+			dc, dcDiags := diskConfigFromBlock(ctx, ex, i, b)
 			diags.Append(dcDiags...)
 			disks = append(disks, dc)
 		}
@@ -189,7 +189,7 @@ func buildDisks(ctx context.Context, blocks []DiskBlockModel, legacy legacyDiskA
 	return disks, diags
 }
 
-func diskConfigFromBlock(ctx context.Context, idx int, b DiskBlockModel) (hypervisor.DiskConfig, diag.Diagnostics) {
+func diskConfigFromBlock(ctx context.Context, ex exec.Executor, idx int, b DiskBlockModel) (hypervisor.DiskConfig, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	dt := hypervisor.DiskOverlay
@@ -226,8 +226,9 @@ func diskConfigFromBlock(ctx context.Context, idx int, b DiskBlockModel) (hyperv
 			diags.AddError("Invalid disk configuration",
 				fmt.Sprintf("disk %d: `size_mb` is only valid for `type = \"overlay\"` (cannot resize a %s disk).", idx, dt))
 		}
-		// The device / file must already exist; fail fast with a clear error.
-		if _, err := os.Stat(source); err != nil {
+		// The device / file must already exist on the target; fail fast with a
+		// clear error.
+		if _, err := ex.Stat(ctx, source); err != nil {
 			diags.AddError("Invalid disk configuration",
 				fmt.Sprintf("disk %d: cannot access source %q: %v", idx, source, err))
 		}

@@ -6,13 +6,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -183,12 +182,12 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("TAP Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("TAP Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -214,7 +213,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.Group.IsNull() && !data.Group.IsUnknown() {
 		moreArgs = append(moreArgs, "group", data.Group.ValueString())
 	}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("TAP Resource Error",
 			"Unable to create a new TAP.")
@@ -226,7 +225,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 	if !data.MTU.IsNull() && !data.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", data.MTU.ValueInt64())
 		moreArgs := []string{"link", "set", "dev", tapIf, "mtu", mtu}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("TAP Resource Error",
 				"Unable to create a new TAP.")
@@ -241,7 +240,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		// When netns is set, skip master/state/ipv4 — the mover daemon
 		// handles these after moving the TAP into the namespace.
 		netns := data.NetNS.ValueString()
-		if err := r.startTAPMover(d, &data, netns); err != nil {
+		if err := r.startTAPMover(ctx, d, &data, netns); err != nil {
 			resp.Diagnostics.AddError("TAP Resource Error",
 				fmt.Sprintf("Failed to start TAP mover daemon: %v", err))
 			return
@@ -255,7 +254,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		if !data.Master.IsNull() && !data.Master.IsUnknown() {
 			master := data.Master.ValueString()
 			moreArgs := []string{"link", "set", "dev", tapIf, "master", master}
-			res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 			if err != nil {
 				resp.Diagnostics.AddError("TAP Resource Error",
 					"Unable to create a new TAP.")
@@ -269,7 +268,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		if !data.State.IsNull() && !data.State.IsUnknown() {
 			state := data.State.ValueString()
 			moreArgs := []string{"link", "set", "dev", tapIf, state}
-			res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 			if err != nil {
 				resp.Diagnostics.AddError("TAP Resource Error",
 					"Unable to create a new TAP.")
@@ -291,7 +290,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 			}
 
 			moreArgs := []string{"addr", "add", addr, "dev", tapIf}
-			res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 			if err != nil {
 				resp.Diagnostics.AddError("TAP Resource Error",
 					"Unable to create a new TAP.")
@@ -302,7 +301,7 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		}
 
 		// Read the TAP current state.
-		if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
+		if diags, err := r.readTAP(ctx, d, ipCmd, ipArgs, &data); err != nil {
 			resp.Diagnostics.AddError("Failed to read TAP state", err.Error())
 			resp.Diagnostics.Append(diags...)
 			return
@@ -330,14 +329,14 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 
 	if hasNetNS {
 		// Read mover status file to determine where the TAP is.
-		moverStatus := r.readMoverStatus(d)
+		moverStatus := r.readMoverStatus(ctx, d)
 		data.MoverStatus = types.StringValue(moverStatus)
 
 		netns := data.NetNS.ValueString()
 		if moverStatus == "moved" {
 			// TAP has been moved into the netns — query it there.
 			ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
-			if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
+			if diags, err := r.readTAP(ctx, d, ipCmd, ipArgs, &data); err != nil {
 				if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 					resp.State.RemoveResource(ctx)
 					return
@@ -349,7 +348,7 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 		} else {
 			// TAP is still in the default namespace (pending or error).
 			ipCmd, ipArgs := buildIPCommand(r.providerConf, "")
-			if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
+			if diags, err := r.readTAP(ctx, d, ipCmd, ipArgs, &data); err != nil {
 				if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 					resp.State.RemoveResource(ctx)
 					return
@@ -370,7 +369,7 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 		}
 
 		// Read the TAP current state.
-		if diags, err := r.readTAP(d, ipCmd, ipArgs, &data); err != nil {
+		if diags, err := r.readTAP(ctx, d, ipCmd, ipArgs, &data); err != nil {
 			// Check for various error messages that indicate the device doesn't exist.
 			if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 				// Resource was deleted outside Terraform: remove from state.
@@ -418,7 +417,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 
 	// Stop the mover daemon if it's running.
 	if hasNetNS {
-		r.stopTAPMover(d)
+		r.stopTAPMover(ctx, d)
 	}
 
 	// Default namespace ip command.
@@ -435,14 +434,14 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		// Try to move the TAP back to the default namespace.
 		nsIpCmd, nsIpArgs := buildIPCommand(r.providerConf, netns)
 		moveBackArgs := []string{"link", "set", tapIf, "netns", "1"}
-		cmd.Run(d, nsIpCmd, append(nsIpArgs, moveBackArgs...)...)
+		r.providerConf.Exec.Run(ctx, d, nsIpCmd, append(nsIpArgs, moveBackArgs...)...)
 		// Ignore errors — TAP or netns may already be gone.
 	}
 
 	// Remove from bridge first if attached (in default namespace).
 	if !data.Master.IsNull() {
 		moreArgs := []string{"link", "set", "dev", tapIf, "nomaster"}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			if errchecker.ContainsNone(err, intfNotFoundStrs) &&
 				errchecker.DiagsNone(res.Diagnostics(), intfNotFoundStrs) {
@@ -456,7 +455,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 	// Delete an existing TAP.
 	moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap"}
 	// moreArgs := []string{"tuntap", "delete", "dev", tapIf, "mode", "tap", "multi_queue"}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		if errchecker.ContainsNone(err, intfNotFoundStrs) &&
 			errchecker.DiagsNone(res.Diagnostics(), intfNotFoundStrs) {
@@ -466,7 +465,7 @@ func (r *TAP) Delete(ctx context.Context, req resource.DeleteRequest, resp *reso
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("TAP Resource Delete Error",
 			fmt.Sprintf("Can't delete TAP resource directory: %v", err))
 		return
@@ -477,12 +476,12 @@ func (r *TAP) ImportState(ctx context.Context, req resource.ImportStateRequest, 
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPModel) (diag.Diagnostics, error) {
+func (r *TAP) readTAP(ctx context.Context, resPath string, ipCmd string, ipArgs []string, model *TAPModel) (diag.Diagnostics, error) {
 	tapIf := model.Name.ValueString()
 
 	// Check if TAP exists and get info.
 	moreArgs := []string{"link", "show", tapIf}
-	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve TAP '%s' details: %w", tapIf, err)
 	}
@@ -530,7 +529,7 @@ func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPM
 
 	// Get IP address(es) of TAP.
 	moreArgs = []string{"addr", "show", tapIf}
-	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve TAP '%s' addreses: %w", tapIf, err)
 	}
@@ -547,7 +546,7 @@ func (r *TAP) readTAP(resPath string, ipCmd string, ipArgs []string, model *TAPM
 }
 
 // startTAPMover writes the mover config YAML and starts the mover daemon.
-func (r *TAP) startTAPMover(d string, data *TAPModel, netns string) error {
+func (r *TAP) startTAPMover(ctx context.Context, d string, data *TAPModel, netns string) error {
 	tapIf := data.Name.ValueString()
 	statusFile := filepath.Join(d, "mover_status")
 	configPath := filepath.Join(d, "mover_config.yaml")
@@ -569,27 +568,28 @@ func (r *TAP) startTAPMover(d string, data *TAPModel, netns string) error {
 		r.providerConf.UseSudo, r.providerConf.Sudo, r.providerConf.IP,
 	)
 
-	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, configPath, []byte(config), 0o600); err != nil {
 		return fmt.Errorf("can't write mover config: %w", err)
 	}
 
-	srvCmd := os.Args[0]
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", pidFile, "-tap-mover", "-tm.config", configPath}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start TAP mover: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
 // stopTAPMover attempts to stop the mover daemon by reading its PID file.
-func (r *TAP) stopTAPMover(d string) {
+func (r *TAP) stopTAPMover(ctx context.Context, d string) {
 	pidFile := filepath.Join(d, "mover_pid")
-	pidBytes, err := os.ReadFile(pidFile)
+	pidBytes, err := r.providerConf.Exec.ReadFile(ctx, pidFile)
 	if err != nil {
 		return
 	}
@@ -597,25 +597,18 @@ func (r *TAP) stopTAPMover(d string) {
 	if err != nil {
 		return
 	}
-	if r.providerConf.UseSudo {
-		cmd.Run(d, r.providerConf.Sudo, "-n", "kill", fmt.Sprintf("%d", pid))
-	} else {
-		p, err := os.FindProcess(int(pid))
-		if err == nil {
-			p.Kill()
-		}
-	}
+	r.providerConf.Exec.Kill(ctx, int(pid), syscall.SIGKILL)
 }
 
 // readMoverStatus reads the mover status file and returns the status string.
-func (r *TAP) readMoverStatus(d string) string {
+func (r *TAP) readMoverStatus(ctx context.Context, d string) string {
 	statusFile := filepath.Join(d, "mover_status")
-	data, err := os.ReadFile(statusFile)
+	data, err := r.providerConf.Exec.ReadFile(ctx, statusFile)
 	if err != nil {
 		// Check if mover PID file exists — if so, mover was started but
 		// hasn't finished yet.
 		pidFile := filepath.Join(d, "mover_pid")
-		if _, err := os.Stat(pidFile); err == nil {
+		if _, err := r.providerConf.Exec.Stat(ctx, pidFile); err == nil {
 			return "pending"
 		}
 		return ""

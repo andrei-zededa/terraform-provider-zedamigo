@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 
@@ -262,12 +261,12 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -288,7 +287,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 	}
 
-	disks, diskDiags := buildDisks(ctx, data.Disks, legacyDiskAttrs{
+	disks, diskDiags := buildDisks(ctx, r.providerConf.Exec, data.Disks, legacyDiskAttrs{
 		DiskImageBase:  data.DiskImgBase,
 		Disk1ImageBase: data.Disk1ImgBase,
 		DiskSizeMB:     types.Int64Null(),
@@ -342,7 +341,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	data.DiskImg = types.StringValue(diskImagePath(paths.DiskImages, 0))
 	data.Disk1Img = types.StringValue(diskImagePath(paths.DiskImages, 1))
 
-	success, softSerial, err := readInstalledNode(r.providerConf, d)
+	success, softSerial, err := readInstalledNode(ctx, r.providerConf, d)
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
 			fmt.Sprintf("Can't read EVE-OS install log: %v", err))
@@ -354,8 +353,8 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func readInstalledNode(_ *ZedAmigoProviderConfig, path string) (bool, string, error) {
-	x, err := os.ReadFile(filepath.Join(path, "serial_console_install.log"))
+func readInstalledNode(ctx context.Context, pConf *ZedAmigoProviderConfig, path string) (bool, string, error) {
+	x, err := pConf.Exec.ReadFile(ctx, filepath.Join(path, "serial_console_install.log"))
 	if err != nil {
 		return false, "", fmt.Errorf("%w", err)
 	}
@@ -382,7 +381,7 @@ func (r *InstalledNode) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
-	success, softSerial, err := readInstalledNode(r.providerConf, r.getResourceDir(data.ID.ValueString()))
+	success, softSerial, err := readInstalledNode(ctx, r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Read Error",
 			fmt.Sprintf("Can't read EVE-OS install log: %v", err))
@@ -417,7 +416,7 @@ func (r *InstalledNode) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("Installed Edge Node Resource Delete Error",
 			fmt.Sprintf("Can't delete resource directory: %v", err))
 		return

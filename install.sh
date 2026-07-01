@@ -75,6 +75,23 @@ path_prepend() {
 	} >> "$rc"
 }
 
+# --- Parse arguments ---
+# Supports an optional `--binary-only` flag (used by the terraform provider when
+# it bootstraps its own binary on a remote SSH target): it downloads and extracts
+# only the provider binary, prints its absolute path as the final stdout line,
+# and skips the OpenTofu install, `tofu init` verification, PATH edits and the
+# runtime dependency advisory. The remaining positional argument is the version.
+BINARY_ONLY=""
+args=""
+for a in "$@"; do
+	case "$a" in
+		--binary-only) BINARY_ONLY=1 ;;
+		*) args="${args:+$args }$a" ;;
+	esac
+done
+# shellcheck disable=SC2086
+set -- $args
+
 # --- Detect OS and architecture ---
 INSTALL_VERSION="${1:-latest}"
 
@@ -101,11 +118,17 @@ esac
 
 info "Installing version '$INSTALL_VERSION' of the zedamigo terraform provider ($SYSTEM/$ARCH)."
 
-# --- Fetch release version ---
-version="$(curl -fsSL "https://api.github.com/repos/andrei-zededa/terraform-provider-zedamigo/releases/$INSTALL_VERSION" \
-	| grep -E '^[[:space:]]+"name":[[:space:]]+"v[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+",$' \
-	| head -n1 \
-	| sed -E 's/^[[:space:]]+"name":[[:space:]]+"v([[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+)",$/\1/g')"
+# --- Resolve release version ---
+# For "latest" we ask the GitHub API; for an explicit version we trust the
+# argument (stripping a leading "v") and use the matching release tag directly.
+if [ "$INSTALL_VERSION" = "latest" ]; then
+	version="$(curl -fsSL "https://api.github.com/repos/andrei-zededa/terraform-provider-zedamigo/releases/latest" \
+		| grep -E '^[[:space:]]+"name":[[:space:]]+"v[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+",$' \
+		| head -n1 \
+		| sed -E 's/^[[:space:]]+"name":[[:space:]]+"v([[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+)",$/\1/g')"
+else
+	version="${INSTALL_VERSION#v}"
+fi
 
 if [ -z "$version" ]; then
 	error "Could not determine release version. Check that the release '$INSTALL_VERSION' exists."
@@ -127,6 +150,19 @@ unzip -o "$TEMP_DIR/$zip_file" -d "$PROVIDER_DIR"
 chmod +x "$PROVIDER_DIR"/terraform-provider-zedamigo*
 
 info "Provider extracted to $PROVIDER_DIR"
+
+# In binary-only mode, print the installed binary path (the ONLY thing written
+# to stdout) and stop here — skip OpenTofu install, verification and advisories.
+if [ -n "$BINARY_ONLY" ]; then
+	bin="$(find "$PROVIDER_DIR" -maxdepth 1 -type f -name 'terraform-provider-zedamigo*' | head -n1)"
+	if [ -z "$bin" ]; then
+		error "Could not locate the extracted provider binary in $PROVIDER_DIR."
+		exit 1
+	fi
+	info "Binary-only install complete: $bin"
+	printf '%s\n' "$bin"
+	exit 0
+fi
 
 # --- Install OpenTofu if no terraform/tofu found ---
 _tf="$(command -v opentofu || command -v tofu || command -v terraform || echo "")"

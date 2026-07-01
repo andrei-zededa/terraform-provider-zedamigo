@@ -5,10 +5,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -205,29 +203,29 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
-	if err := os.MkdirAll(filepath.Join(d, "config"), 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, filepath.Join(d, "config"), 0o700); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := os.WriteFile(filepath.Join(d, "config", "server"), []byte(data.Cluster.ValueString()), 0o600); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "server"), []byte(data.Cluster.ValueString()), 0o600); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Can't write /config/server file: %s", err))
 		return
 	}
 	tlsCA := data.TLSCA.ValueString()
 	if len(tlsCA) > 0 {
-		if err := os.WriteFile(filepath.Join(d, "config", "v2tlsbaseroot-certificates.pem"), []byte(tlsCA), 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "v2tlsbaseroot-certificates.pem"), []byte(tlsCA), 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/v2tlsbaseroot-certificates.pem file: %s", err))
 			return
@@ -235,7 +233,7 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 	objCA := data.ObjCA.ValueString()
 	if len(objCA) > 0 {
-		if err := os.WriteFile(filepath.Join(d, "config", "root-certificate.pem"), []byte(objCA), 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "root-certificate.pem"), []byte(objCA), 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/root-certificate.pem file: %s", err))
 			return
@@ -243,7 +241,7 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 	hosts := data.Hosts.ValueString()
 	if len(hosts) > 0 {
-		if err := os.WriteFile(filepath.Join(d, "config", "hosts"), []byte(hosts), 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "hosts"), []byte(hosts), 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/hosts file: %s", err))
 			return
@@ -254,7 +252,7 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 		// Ensure that the result file has at least one newline, otherwise
 		// it is not processed correctly.
 		b := []byte(sshKey + "\n")
-		if err := os.WriteFile(filepath.Join(d, "config", "authorized_keys"), b, 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "authorized_keys"), b, 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/authorized_keys file: %s", err))
 			return
@@ -264,7 +262,7 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	if len(grubCfg) > 0 {
 		// Ensure that the result file has at least one newline.
 		b := []byte(grubCfg + "\n")
-		if err := os.WriteFile(filepath.Join(d, "config", "grub.cfg"), b, 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "grub.cfg"), b, 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/grub.cfg file: %s", err))
 			return
@@ -272,25 +270,25 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 	dpcOver := data.DPCOver.ValueString()
 	if len(dpcOver) > 0 {
-		if err := os.MkdirAll(filepath.Join(d, "config", "DevicePortConfig"), 0o700); err != nil {
+		if err := r.providerConf.Exec.MkdirAll(ctx, filepath.Join(d, "config", "DevicePortConfig"), 0o700); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Unable to create resource specific directory: %s", err))
 			return
 		}
 		// Ensure that the result file has at least one newline.
 		b := []byte(dpcOver + "\n")
-		if err := os.WriteFile(filepath.Join(d, "config", "DevicePortConfig", "override.json"), b, 0o600); err != nil {
+		if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "config", "DevicePortConfig", "override.json"), b, 0o600); err != nil {
 			resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 				fmt.Sprintf("Can't write /config/DevicePortConfig/override.json file: %s", err))
 			return
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(d, "out"), 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, filepath.Join(d, "out"), 0o700); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	res, err := cmd.Run(d, r.providerConf.Docker, "run",
+	res, err := r.providerConf.Exec.Run(ctx, d, r.providerConf.Docker, "run",
 		"--network", "none", "--rm",
 		"-v", fmt.Sprintf("%s:/in", filepath.Join(d, "config")),
 		"-v", fmt.Sprintf("%s:/out", filepath.Join(d, "out")),
@@ -304,7 +302,7 @@ func (r *EveInstaller) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	i := fmt.Sprintf("%s.custom_installer.%s", filepath.Join(d, data.Name.ValueString()), format)
-	if err := os.Rename(filepath.Join(d, "out", fmt.Sprintf("installer.%s", format)), i); err != nil {
+	if err := r.providerConf.Exec.Rename(ctx, filepath.Join(d, "out", fmt.Sprintf("installer.%s", format)), i); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Error",
 			fmt.Sprintf("Unable to move installer file: %v", err))
 		return
@@ -374,7 +372,7 @@ func (r *EveInstaller) Delete(ctx context.Context, req resource.DeleteRequest, r
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("EVE-OS Installer Resource Delete Error",
 			fmt.Sprintf("Can't delete resource directory: %v", err))
 		return

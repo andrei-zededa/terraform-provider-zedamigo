@@ -6,13 +6,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
@@ -183,12 +181,12 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("Bridge Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Bridge Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -204,7 +202,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 
 	// Create the bridge.
 	moreArgs := []string{"link", "add", br, "type", "bridge"}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("Bridge Resource Error",
 			"Unable to create a new bridge.")
@@ -216,7 +214,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	if !data.MTU.IsNull() && !data.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", data.MTU.ValueInt64())
 		moreArgs := []string{"link", "set", "dev", br, "mtu", mtu}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to create a new bridge.")
@@ -229,7 +227,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	if !data.State.IsNull() && !data.State.IsUnknown() {
 		state := data.State.ValueString()
 		moreArgs := []string{"link", "set", "dev", br, state}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to create a new bridge.")
@@ -242,7 +240,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	if !data.MACAddress.IsNull() && !data.MACAddress.IsUnknown() {
 		macAddr := data.MACAddress.ValueString()
 		moreArgs := []string{"link", "set", "dev", br, "address", macAddr}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to set MAC address for bridge.")
@@ -264,7 +262,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", br}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to create a new bridge.")
@@ -287,7 +285,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", br}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to create a new bridge.")
@@ -309,7 +307,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 		for _, intf := range ifaces {
 			// Attach the interface as a member of the bridge.
 			moreArgs := []string{"link", "set", "dev", intf, "master", br}
-			res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 			if err != nil {
 				resp.Diagnostics.AddError("Bridge Resource Error",
 					fmt.Sprintf("Unable to enslave interface '%s' to bridge '%s'.", intf, br))
@@ -320,7 +318,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 			// Bring the enslaved interface up. NOTE: this MUST be done after
 			// setting the master.
 			moreArgs = []string{"link", "set", "dev", intf, "up"}
-			res, err = cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+			res, err = r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 			if err != nil {
 				resp.Diagnostics.AddError("Bridge Resource Error",
 					fmt.Sprintf("Unable to bring enslaved interface '%s' up.", intf))
@@ -331,7 +329,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 	}
 
 	// Read the bridge current state.
-	if diags, err := r.readBridge(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readBridge(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read bridge state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -357,7 +355,7 @@ func (r *Bridge) Create(ctx context.Context, req resource.CreateRequest, resp *r
 			return
 		}
 		moreArgs := []string{"addr", "add", fmt.Sprintf("%s/64", ll.String()), "scope", "link", "dev", br}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("Bridge Resource Error",
 				"Unable to create a new bridge.")
@@ -390,7 +388,7 @@ func (r *Bridge) Read(ctx context.Context, req resource.ReadRequest, resp *resou
 	ipCmd, ipArgs := buildIPCommand(r.providerConf, netns)
 
 	// Read the bridge current state.
-	if diags, err := r.readBridge(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readBridge(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		// Check for various error messages that indicate the device doesn't exist.
 		if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 			// Resource was deleted outside Terraform: remove from state.
@@ -441,7 +439,7 @@ func (r *Bridge) Delete(ctx context.Context, req resource.DeleteRequest, resp *r
 
 	// Delete an existing bridge.
 	moreArgs := []string{"link", "delete", br, "type", "bridge"}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		errMsg := err.Error()
 		// Check for various error messages that indicate the device doesn't exist.
@@ -458,7 +456,7 @@ func (r *Bridge) Delete(ctx context.Context, req resource.DeleteRequest, resp *r
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("Bridge Resource Delete Error",
 			fmt.Sprintf("Can't delete bridge resource directory: %v", err))
 		return
@@ -469,12 +467,12 @@ func (r *Bridge) ImportState(ctx context.Context, req resource.ImportStateReques
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model *BridgeModel) (diag.Diagnostics, error) {
+func (r *Bridge) readBridge(ctx context.Context, resPath string, ipCmd string, ipArgs []string, model *BridgeModel) (diag.Diagnostics, error) {
 	br := model.Name.ValueString()
 
 	// Check if bridge exists and get info.
 	moreArgs := []string{"link", "show", br}
-	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' details: %w", br, err)
 	}
@@ -518,7 +516,7 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 
 	// Get IP address(es) of bridge.
 	moreArgs = []string{"addr", "show", br}
-	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' addreses: %w", br, err)
 	}
@@ -566,7 +564,7 @@ func (r *Bridge) readBridge(resPath string, ipCmd string, ipArgs []string, model
 		model.EnslavedInterfaces = types.SetNull(types.StringType)
 	} else {
 		moreArgs = []string{"link", "show", "master", br}
-		res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			return res.Diagnostics(), fmt.Errorf("can't retrieve bridge '%s' members: %w", br, err)
 		}

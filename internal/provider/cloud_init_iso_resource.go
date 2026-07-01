@@ -5,10 +5,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -156,34 +154,34 @@ func (r *CloudInitISO) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(filepath.Join(d, "cloud-init"), 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, filepath.Join(d, "cloud-init"), 0o700); err != nil {
 		resp.Diagnostics.AddError("Cloud Init ISO Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Cloud Init ISO Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
-	if err := os.WriteFile(filepath.Join(d, "cloud-init", "user-data"), []byte(data.UserData.ValueString()), 0o600); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "cloud-init", "user-data"), []byte(data.UserData.ValueString()), 0o600); err != nil {
 		resp.Diagnostics.AddError("Cloud Init ISO Resource Error",
 			fmt.Sprintf("Unable to create resource specific file `user-data`: %s", err))
 		return
 	}
-	if err := os.WriteFile(filepath.Join(d, "cloud-init", "meta-data"), []byte(data.MetaData.ValueString()), 0o600); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "cloud-init", "meta-data"), []byte(data.MetaData.ValueString()), 0o600); err != nil {
 		resp.Diagnostics.AddError("Cloud Init ISO Resource Error",
 			fmt.Sprintf("Unable to create resource specific file `meta-data`: %s", err))
 		return
 	}
-	if err := os.WriteFile(filepath.Join(d, "cloud-init", "network-config"), []byte(data.NetworkConfig.ValueString()), 0o600); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "cloud-init", "network-config"), []byte(data.NetworkConfig.ValueString()), 0o600); err != nil {
 		resp.Diagnostics.AddError("Cloud Init ISO Resource Error",
 			fmt.Sprintf("Unable to create resource specific file `network-config`: %s", err))
 		return
 	}
 
 	i := fmt.Sprintf("%s.iso", filepath.Join(d, data.Name.ValueString()))
-	res, err := cmd.Run(d, r.providerConf.GenISOImage, "-output", i,
+	res, err := r.providerConf.Exec.Run(ctx, d, r.providerConf.GenISOImage, "-output", i,
 		"-volid", "cidata", "-joliet", "-rock",
 		filepath.Join(d, "cloud-init", "user-data"),
 		filepath.Join(d, "cloud-init", "meta-data"),
@@ -247,7 +245,7 @@ func (r *CloudInitISO) Delete(ctx context.Context, req resource.DeleteRequest, r
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("Cloud init ISO Resource Delete Error",
 			fmt.Sprintf("Can't delete disk image directory: %v", err))
 		return

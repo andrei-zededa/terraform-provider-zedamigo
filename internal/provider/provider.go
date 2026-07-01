@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/adrg/xdg"
 
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 )
@@ -55,6 +55,12 @@ type ZedAmigoProviderConfig struct {
 	GenISOImage string
 	IP          string
 	Hypervisor  hypervisor.Hypervisor
+
+	// Exec is the executor used for ALL operations on `Target`: running
+	// commands, filesystem access, process management and socket dialing.
+	// It is a LocalExecutor when Target is localhost and an SSHExecutor
+	// otherwise. Resources reach it as r.providerConf.Exec.
+	Exec exec.Executor
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -79,6 +85,7 @@ type ZedAmigoProviderModel struct {
 	Target  types.String `tfsdk:"target"`
 	LibPath types.String `tfsdk:"lib_path"`
 	UseSudo types.Bool   `tfsdk:"use_sudo"`
+	SSH     *SSHModel    `tfsdk:"ssh"`
 }
 
 func (p *ZedAmigoProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -93,8 +100,9 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 				Description: "Target host on which to create resources, execute commands.",
 				MarkdownDescription: undent.Md(`
 				Target host on which the zedamigo provider will execute commands and
-				create resources. ONLY |localhost| is currently supported. Optional and
-				if not specified it defaults to |localhost|.`),
+				create resources. Defaults to |localhost| (run everything locally). Set
+				it to a hostname or IP address to operate on a remote host over SSH; in
+				that case configure the connection in the |ssh| block. Optional.`),
 				Optional: true,
 			},
 			"lib_path": schema.StringAttribute{
@@ -102,7 +110,9 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 				MarkdownDescription: undent.Md(`
 				The provider lib directory, where all disk images and other files are
 				created on |target|. Optional and if not specified it defaults to
-				|$XDG_STATE_HOME/zedamigo/|, e.g. |$HOME/.local/state/zedamigo/|.`),
+				|$XDG_STATE_HOME/zedamigo/|, e.g. |$HOME/.local/state/zedamigo/|. For a
+				remote |target| the default is resolved from the remote host's
+				environment.`),
 				Optional: true,
 			},
 			"use_sudo": schema.BoolAttribute{
@@ -113,6 +123,9 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 				to |false|.`),
 				Optional: true,
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"ssh": sshSchemaBlock(),
 		},
 	}
 }
@@ -188,7 +201,58 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		return
 	}
 
-	if err := os.MkdirAll(zaConf.LibPath, 0o700); err != nil {
+	// Determine whether privileged commands should be wrapped with sudo. This
+	// is needed before building the executor.
+	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
+		zaConf.UseSudo = true
+	}
+
+	// Build the executor used for ALL operations on `Target`. For localhost a
+	// LocalExecutor runs everything on the machine running the provider; for any
+	// other target a SSHExecutor runs everything on the remote host. From here
+	// on, filesystem and command operations go through zaConf.Exec.
+	if zaConf.Target == DefaultZedAmigoTarget {
+		zaConf.Exec = exec.NewLocal(zaConf.UseSudo)
+	} else {
+		sshExec, err := buildSSHExecutor(zaConf.Target, conf.SSH, zaConf.UseSudo)
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid SSH configuration", err.Error())
+			return
+		}
+		zaConf.Exec = sshExec
+
+		// When lib_path was not set explicitly, resolve the default from the
+		// remote host's environment rather than the local one.
+		if conf.LibPath.IsNull() {
+			rp, err := resolveRemoteLibPath(ctx, sshExec)
+			if err != nil {
+				resp.Diagnostics.AddError("Can't resolve remote lib_path",
+					fmt.Sprintf("%v. Set lib_path explicitly in the provider configuration.", err))
+				return
+			}
+			zaConf.LibPath = rp
+			ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
+		}
+
+		// Resolve the provider binary path on the target (used by the
+		// self-invoked daemons). Prefer an explicit remote_binary_path; otherwise
+		// bootstrap it via the install script pinned to this provider's version.
+		var rbp types.String
+		if conf.SSH != nil {
+			rbp = conf.SSH.RemoteBinaryPath
+		}
+		selfPath := sshStr(rbp, "ZEDAMIGO_REMOTE_BINARY_PATH")
+		if selfPath == "" {
+			selfPath, err = bootstrapRemoteBinary(ctx, sshExec, zaConf.LibPath, p.version)
+			if err != nil {
+				resp.Diagnostics.AddError("Can't provision the provider binary on the target", err.Error())
+				return
+			}
+		}
+		sshExec.SetSelfPath(selfPath)
+	}
+
+	if err := zaConf.Exec.MkdirAll(ctx, zaConf.LibPath, 0o700); err != nil {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("lib_path"),
 			fmt.Sprintf("%s", err),
@@ -201,9 +265,8 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 
-	if !conf.UseSudo.IsNull() && conf.UseSudo.ValueBool() {
-		zaConf.UseSudo = true
-		sudo, err := exec.LookPath("sudo")
+	if zaConf.UseSudo {
+		sudo, err := zaConf.Exec.LookPath(ctx, "sudo")
 		if err != nil {
 			resp.Diagnostics.AddError("Can't find the `sudo` executable.",
 				fmt.Sprintf("Can't find the `sudo` executable, got error: %v", err))
@@ -214,7 +277,7 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 		zaConf.Sudo = sudo
 	}
 
-	bash, err := exec.LookPath("bash")
+	bash, err := zaConf.Exec.LookPath(ctx, "bash")
 	if err != nil {
 		resp.Diagnostics.AddError("Can't find bash.",
 			fmt.Sprintf("Can't find bash, got error: %v", err))
@@ -224,7 +287,7 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	}
 	zaConf.Bash = bash
 
-	do, err := exec.LookPath("docker")
+	do, err := zaConf.Exec.LookPath(ctx, "docker")
 	if err != nil {
 		resp.Diagnostics.AddError("Can't find the `docker` executable.",
 			fmt.Sprintf("Can't find the `docker` executable, got error: %v", err))
@@ -294,4 +357,3 @@ func New(version string) func() provider.Provider {
 		}
 	}
 }
-

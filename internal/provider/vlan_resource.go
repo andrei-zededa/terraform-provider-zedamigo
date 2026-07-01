@@ -6,13 +6,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/errchecker"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/lladdr"
 	"github.com/davecgh/go-spew/spew"
@@ -163,12 +161,12 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("VLAN Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("VLAN Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -189,7 +187,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 		"link", "add", "link", data.Parent.ValueString(), "name", subIf,
 		"type", "vlan", "id", fmt.Sprintf("%d", data.VlanID.ValueInt64()),
 	}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("VLAN Resource Error",
 			"Unable to create a new VLAN.")
@@ -201,7 +199,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	if !data.MTU.IsNull() && !data.MTU.IsUnknown() {
 		mtu := fmt.Sprintf("%d", data.MTU.ValueInt64())
 		moreArgs := []string{"link", "set", "dev", subIf, "mtu", mtu}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("VLAN Resource Error",
 				"Unable to create a new VLAN.")
@@ -214,7 +212,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	if !data.State.IsNull() && !data.State.IsUnknown() {
 		state := data.State.ValueString()
 		moreArgs := []string{"link", "set", "dev", subIf, state}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("VLAN Resource Error",
 				"Unable to create a new VLAN.")
@@ -236,7 +234,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", subIf}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("VLAN Resource Error",
 				"Unable to create a new VLAN.")
@@ -259,7 +257,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 		}
 
 		moreArgs := []string{"addr", "add", addr, "dev", subIf}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("VLAN Resource Error",
 				"Unable to create a new VLAN.")
@@ -270,7 +268,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 	}
 
 	// Read the VLAN current state.
-	if diags, err := r.readVLAN(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readVLAN(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read VLAN state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -296,7 +294,7 @@ func (r *VLAN) Create(ctx context.Context, req resource.CreateRequest, resp *res
 			return
 		}
 		moreArgs := []string{"addr", "add", fmt.Sprintf("%s/64", ll.String()), "scope", "link", "dev", subIf}
-		res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+		res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 		if err != nil {
 			resp.Diagnostics.AddError("VLAN Resource Error",
 				"Unable to create a new VLAN.")
@@ -330,7 +328,7 @@ func (r *VLAN) Read(ctx context.Context, req resource.ReadRequest, resp *resourc
 	}
 
 	// Read the VLAN current state.
-	if diags, err := r.readVLAN(d, ipCmd, ipArgs, &data); err != nil {
+	if diags, err := r.readVLAN(ctx, d, ipCmd, ipArgs, &data); err != nil {
 		// Check for various error messages that indicate the device doesn't exist.
 		if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
 			// Resource was deleted outside Terraform: remove from state.
@@ -382,7 +380,7 @@ func (r *VLAN) Delete(ctx context.Context, req resource.DeleteRequest, resp *res
 
 	// Delete an existing VLAN.
 	moreArgs := []string{"link", "del", subIf}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		// Check for various error messages that indicate the device doesn't exist.
 		// If the device doesn't exist, the delete is successful (idempotent),
@@ -395,7 +393,7 @@ func (r *VLAN) Delete(ctx context.Context, req resource.DeleteRequest, resp *res
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("VLAN Resource Delete Error",
 			fmt.Sprintf("Can't delete VLAN resource directory: %v", err))
 		return
@@ -406,12 +404,12 @@ func (r *VLAN) ImportState(ctx context.Context, req resource.ImportStateRequest,
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VLANModel) (diag.Diagnostics, error) {
+func (r *VLAN) readVLAN(ctx context.Context, resPath string, ipCmd string, ipArgs []string, model *VLANModel) (diag.Diagnostics, error) {
 	subIf := model.Name.ValueString()
 
 	// Check if VLAN exists and get info.
 	moreArgs := []string{"link", "show", subIf}
-	res, err := cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve VLAN '%s' details: %w", subIf, err)
 	}
@@ -455,7 +453,7 @@ func (r *VLAN) readVLAN(resPath string, ipCmd string, ipArgs []string, model *VL
 
 	// Get IP address(es) of VLAN.
 	moreArgs = []string{"addr", "show", subIf}
-	res, err = cmd.Run(resPath, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err = r.providerConf.Exec.Run(ctx, resPath, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		return res.Diagnostics(), fmt.Errorf("can't retrieve VLAN '%s' addreses: %w", subIf, err)
 	}

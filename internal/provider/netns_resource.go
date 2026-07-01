@@ -5,11 +5,9 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -115,12 +113,12 @@ func (r *NetNS) Create(ctx context.Context, req resource.CreateRequest, resp *re
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("NetNS Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("NetNS Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -137,7 +135,7 @@ func (r *NetNS) Create(ctx context.Context, req resource.CreateRequest, resp *re
 
 	// Create the network namespace.
 	moreArgs := []string{"netns", "add", nsName}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("NetNS Resource Error",
 			"Unable to create a new network namespace.")
@@ -169,7 +167,7 @@ func (r *NetNS) Read(ctx context.Context, req resource.ReadRequest, resp *resour
 
 	// List network namespaces and check if ours exists.
 	moreArgs := []string{"netns", "list"}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		resp.Diagnostics.AddError("NetNS Resource Error",
 			fmt.Sprintf("Unable to list network namespaces: %s", err))
@@ -221,7 +219,7 @@ func (r *NetNS) Delete(ctx context.Context, req resource.DeleteRequest, resp *re
 
 	// Delete the network namespace.
 	moreArgs := []string{"netns", "delete", nsName}
-	res, err := cmd.Run(d, ipCmd, append(ipArgs, moreArgs...)...)
+	res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
 	if err != nil {
 		errMsg := err.Error()
 		// Idempotent: if the namespace doesn't exist, the delete is successful.
@@ -235,7 +233,7 @@ func (r *NetNS) Delete(ctx context.Context, req resource.DeleteRequest, resp *re
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("NetNS Resource Delete Error",
 			fmt.Sprintf("Can't delete NetNS resource directory: %v", err))
 		return

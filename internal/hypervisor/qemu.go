@@ -6,14 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"net"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/qmp"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -27,6 +27,18 @@ type QEMUHypervisor struct {
 	TasksetPath  string
 	UseSudo      bool
 	SudoPath     string
+
+	// Exec runs all commands, filesystem and socket operations on the target
+	// (localhost or, in remote mode, the SSH host).
+	Exec exec.Executor
+}
+
+// qmpDialer returns a qmp.DialFunc that dials through the executor with the
+// given timeout (local net.Dialer or SSH streamlocal forwarding).
+func (h *QEMUHypervisor) qmpDialer(timeout time.Duration) qmp.DialFunc {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return h.Exec.Dial(ctx, network, addr, timeout)
+	}
 }
 
 const (
@@ -55,20 +67,20 @@ func (h *QEMUHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (strin
 
 	tflog.Debug(ctx, "Starting gvproxy for QEMU (self-invoke)", map[string]any{"args": args})
 
-	res, err := cmd.RunDetached(d, os.Args[0], args...)
+	res, err := h.Exec.RunDetached(ctx, d, h.Exec.SelfPath(), args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to start gvproxy: %w; %s", err, res.Stderr)
 	}
 
 	// Write PID file in case gvproxy hasn't written it yet.
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+	if err := h.Exec.WriteFile(ctx, pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write gvproxy PID file: %w", err)
 	}
 
 	// Poll for the socket file to appear.
 	deadline := time.Now().Add(qemuGvproxyPollTimeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(socketPath); err == nil {
+		if _, err := h.Exec.Stat(ctx, socketPath); err == nil {
 			tflog.Debug(ctx, "gvproxy socket ready", map[string]any{"path": socketPath})
 			return socketPath, nil
 		}
@@ -81,9 +93,9 @@ func (h *QEMUHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (strin
 // stopGvproxy sends SIGTERM to the gvproxy process.
 func (h *QEMUHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
 	pidFile := filepath.Join(resourceDir, "gvproxy.pid")
-	pidBytes, err := os.ReadFile(pidFile)
+	pidBytes, err := h.Exec.ReadFile(ctx, pidFile)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if !exec.IsNotExist(err) {
 			tflog.Debug(ctx, "Failed to read gvproxy PID file", map[string]any{"error": err})
 		}
 		return
@@ -95,12 +107,7 @@ func (h *QEMUHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
 		return
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := h.Exec.Kill(ctx, pid, syscall.SIGTERM); err != nil {
 		tflog.Debug(ctx, "SIGTERM to gvproxy failed (may already be stopped)", map[string]any{"error": err})
 	}
 }
@@ -128,7 +135,7 @@ func (h *QEMUHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPat
 			if disk.HasSize {
 				qemuImgArgs = append(qemuImgArgs, fmt.Sprintf("%dM", disk.SizeMB))
 			}
-			res, err := cmd.Run(d, h.QemuImgPath, qemuImgArgs...)
+			res, err := h.Exec.Run(ctx, d, h.QemuImgPath, qemuImgArgs...)
 			if err != nil {
 				return paths, fmt.Errorf("unable to create disk %d image: %w; %s", i, err, res.Stderr)
 			}
@@ -144,7 +151,7 @@ func (h *QEMUHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPat
 	if conf.OVMFVarsSrc != "" {
 		ovSrc = conf.OVMFVarsSrc
 	}
-	if _, err := cmd.CopyFile(ovSrc, paths.OVMFVars); err != nil {
+	if _, err := h.Exec.CopyFile(ctx, ovSrc, paths.OVMFVars); err != nil {
 		return paths, fmt.Errorf("unable to copy UEFI OVMF vars: %w", err)
 	}
 
@@ -303,19 +310,19 @@ set -eu;
 %s %s
 `
 	blob := []byte(fmt.Sprintf(startVMscript, qemuArgs, h.QemuPath, strings.Join(qemuArgs, " ")))
-	if err := os.WriteFile(paths.DebugScript, blob, 0o755); err != nil {
+	if err := h.Exec.WriteFile(ctx, paths.DebugScript, blob, 0o755); err != nil {
 		tflog.Debug(ctx, "Failed to write start VM script", map[string]any{"error": err})
 	}
 
 	// Launch QEMU.
 	if conf.IsInstallation {
 		// Installation runs synchronously (Run, not RunDetached).
-		res, err := cmd.Run(d, h.QemuPath, qemuArgs...)
+		res, err := h.Exec.Run(ctx, d, h.QemuPath, qemuArgs...)
 		if err != nil {
 			return fmt.Errorf("failed to run QEMU VM for installing EVE-OS: %w; %s", err, res.Stderr)
 		}
 	} else {
-		res, err := cmd.RunDetached(d, h.QemuPath, qemuArgs...)
+		res, err := h.Exec.RunDetached(ctx, d, h.QemuPath, qemuArgs...)
 		if err != nil {
 			return fmt.Errorf("failed to start QEMU VM: %w; %s", err, res.Stderr)
 		}
@@ -348,7 +355,7 @@ func (h *QEMUHypervisor) applyCPUPins(ctx context.Context, resourceDir string, c
 	deadline := time.Now().Add(cpuPinPIDPollTimeout)
 	for {
 		var err error
-		pidBytes, err = os.ReadFile(pidFile)
+		pidBytes, err = h.Exec.ReadFile(ctx, pidFile)
 		if err == nil && len(strings.TrimSpace(string(pidBytes))) > 0 {
 			break
 		}
@@ -371,7 +378,7 @@ func (h *QEMUHypervisor) applyCPUPins(ctx context.Context, resourceDir string, c
 }
 
 func (h *QEMUHypervisor) Status(ctx context.Context, resourceDir string) (bool, error) {
-	mon, err := qmp.NewSocketMonitor("unix", filepath.Join(resourceDir, "qmp.socket"), 1*time.Second)
+	mon, err := qmp.NewSocketMonitorWithDialer(ctx, "unix", filepath.Join(resourceDir, "qmp.socket"), h.qmpDialer(1*time.Second))
 	if err != nil {
 		return false, fmt.Errorf("%w", err)
 	}
@@ -403,7 +410,7 @@ func (h *QEMUHypervisor) Status(ctx context.Context, resourceDir string) (bool, 
 }
 
 func (h *QEMUHypervisor) Stop(ctx context.Context, resourceDir string) error {
-	mon, err := qmp.NewSocketMonitor("unix", filepath.Join(resourceDir, "qmp.socket"), 2*time.Second)
+	mon, err := qmp.NewSocketMonitorWithDialer(ctx, "unix", filepath.Join(resourceDir, "qmp.socket"), h.qmpDialer(2*time.Second))
 	if err != nil {
 		return fmt.Errorf("can't create QMP monitor: %w", err)
 	}

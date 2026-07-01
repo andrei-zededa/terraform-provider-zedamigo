@@ -6,12 +6,10 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -359,12 +357,12 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	data.SSHPort = types.Int32Value(10000 + int32(rand.Uint32N(55534)))
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("Edge Node Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -440,7 +438,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
-	disks, diskDiags := buildDisks(ctx, data.Disks, legacyDiskAttrs{
+	disks, diskDiags := buildDisks(ctx, r.providerConf.Exec, data.Disks, legacyDiskAttrs{
 		DiskImageBase:  data.DiskImgBase,
 		Disk1ImageBase: data.Disk1ImgBase,
 		DiskSizeMB:     data.DiskSizeMB,
@@ -516,14 +514,14 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	// Launch tailer for serial console output.
 	if runtime.GOOS == "darwin" {
 		// On macOS (vfkit), read PTY path written by vfkit.Start() and launch PTY tailer.
-		ptyPathBytes, err := os.ReadFile(filepath.Join(d, "serial.pty"))
+		ptyPathBytes, err := r.providerConf.Exec.ReadFile(ctx, filepath.Join(d, "serial.pty"))
 		if err != nil {
 			resp.Diagnostics.AddError("Edge Node Resource Error",
 				fmt.Sprintf("Failed to read serial PTY path: %v", err))
 			return
 		}
 		ptyDevPath := strings.TrimSpace(string(ptyPathBytes))
-		res, err := cmd.RunDetached(d, os.Args[0], []string{
+		res, err := r.providerConf.Exec.RunDetached(ctx, d, r.providerConf.Exec.SelfPath(), []string{
 			"-socket-tailer", "-st.pty", ptyDevPath,
 			"-st.out", data.SerialConsoleLog.ValueString(),
 		}...)
@@ -534,7 +532,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 			return
 		}
 	} else if data.SerialPortServer.ValueBool() {
-		res, err := cmd.RunDetached(d, os.Args[0], []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
+		res, err := r.providerConf.Exec.RunDetached(ctx, d, r.providerConf.Exec.SelfPath(), []string{"-socket-tailer", "-st.connect", data.SerialPortSocket.ValueString(), "-st.out", data.SerialConsoleLog.ValueString()}...)
 		if err != nil {
 			resp.Diagnostics.AddError("Edge Node Resource Error",
 				"Failed to run socket tailer")
@@ -564,7 +562,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	// gvproxy the nic0 string is used verbatim and ssh_port maps to nothing, so we
 	// null both attributes rather than advertise a misleading port.
 	if !customNic0 || gvproxyActive {
-		data.Nic0PortForwards = types.StringValue(hypervisor.DescribePortForwards(data.SSHPort.ValueInt32()))
+		data.Nic0PortForwards = types.StringValue(hypervisor.DescribePortForwards(r.providerConf.Target, data.SSHPort.ValueInt32()))
 	} else {
 		data.SSHPort = types.Int32Null()
 		data.Nic0PortForwards = types.StringNull()
@@ -629,7 +627,7 @@ func (r *EdgeNode) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("Edge Node Resource Delete Error",
 			fmt.Sprintf("Can't delete resource directory: %v", err))
 		return

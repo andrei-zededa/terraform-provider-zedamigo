@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -222,12 +221,12 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("DHCP6Server Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("DHCP6Server Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -242,7 +241,7 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 
 	leasesPath := filepath.Join(d, "leases.sqlite3")
 	confPath := filepath.Join(d, "config.yaml")
-	confFile, err := os.Create(confPath)
+	confFile, err := r.providerConf.Exec.OpenWrite(ctx, confPath, 0o644)
 	if err != nil {
 		resp.Diagnostics.AddError("DHCP6Server Resource Error",
 			fmt.Sprintf("Can't create file '%s': %s", confPath, err))
@@ -302,7 +301,7 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// Only start the daemon if state is "running"
 	if data.State.ValueString() == "running" {
-		if err := r.startDHCP6Server(d, &data); err != nil {
+		if err := r.startDHCP6Server(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("DHCP6Server Resource Error",
 				fmt.Sprintf("Failed to start DHCPv6 server: %v", err))
 			return
@@ -310,7 +309,7 @@ func (r *DHCP6Server) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// Read the DHCP6Server current state.
-	if diags, err := r.readDHCP6Server(d, &data); err != nil {
+	if diags, err := r.readDHCP6Server(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read DHCP6Server state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -334,7 +333,7 @@ func (r *DHCP6Server) Read(ctx context.Context, req resource.ReadRequest, resp *
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Read the DHCP6Server current state.
-	if diags, err := r.readDHCP6Server(d, &data); err != nil {
+	if diags, err := r.readDHCP6Server(ctx, d, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
@@ -397,13 +396,13 @@ func (r *DHCP6Server) Update(ctx context.Context, req resource.UpdateRequest, re
 		})
 
 		if desiredState == "running" {
-			if err := r.startDHCP6Server(d, &plan); err != nil {
+			if err := r.startDHCP6Server(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("DHCP6Server Resource Update Error",
 					fmt.Sprintf("Failed to start DHCPv6 server: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopDHCP6Server(d); err != nil {
+			if err := r.stopDHCP6Server(ctx, d); err != nil {
 				resp.Diagnostics.AddError("DHCP6Server Resource Update Error",
 					fmt.Sprintf("Failed to stop DHCPv6 server: %v", err))
 				return
@@ -414,7 +413,7 @@ func (r *DHCP6Server) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// Read back the current state to verify
-	if diags, err := r.readDHCP6Server(d, &plan); err != nil {
+	if diags, err := r.readDHCP6Server(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read DHCP6Server state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -436,12 +435,12 @@ func (r *DHCP6Server) Delete(ctx context.Context, req resource.DeleteRequest, re
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Stop the DHCPv6 server process if it's running.
-	if err := r.stopDHCP6Server(d); err != nil {
+	if err := r.stopDHCP6Server(ctx, d); err != nil {
 		// Log as warning instead of error, since the daemon might already be stopped
 		tflog.Warn(ctx, "Failed to stop DHCPv6 server during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("DHCP6Server Resource Delete Error",
 			fmt.Sprintf("Can't delete DHCP6Server resource directory: %v", err))
 		return
@@ -453,23 +452,24 @@ func (r *DHCP6Server) ImportState(ctx context.Context, req resource.ImportStateR
 }
 
 // startDHCP6Server starts the DHCPv6 server daemon for the given resource
-func (r *DHCP6Server) startDHCP6Server(d string, data *DHCP6ServerModel) error {
-	srvCmd := os.Args[0]
+func (r *DHCP6Server) startDHCP6Server(ctx context.Context, d string, data *DHCP6ServerModel) error {
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-dhcp6-server", "-d6s.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start DHCPv6 server: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
 // stopDHCP6Server stops the DHCPv6 server daemon for the given resource
-func (r *DHCP6Server) stopDHCP6Server(d string) error {
-	running, proc, err := readDHCP6ServerPID(d)
+func (r *DHCP6Server) stopDHCP6Server(ctx context.Context, d string) error {
+	running, pid, err := readDHCP6ServerPID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find DHCPv6 server process: %w", err)
 	}
@@ -477,30 +477,15 @@ func (r *DHCP6Server) stopDHCP6Server(d string) error {
 		return nil // Already stopped
 	}
 
-	var killErr error
-	if r.providerConf.UseSudo {
-		// Process was started with sudo, so we need sudo to kill it.
-		killCmd := r.providerConf.Sudo
-		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
-		res, err := cmd.Run(d, killCmd, killArgs...)
-		if err != nil {
-			killErr = err
-		} else if res.ExitCode != 0 {
-			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-		}
-	} else {
-		killErr = proc.Kill()
-	}
-
-	if killErr != nil {
-		return fmt.Errorf("can't kill DHCPv6 server process: %w", killErr)
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("can't kill DHCPv6 server process: %w", err)
 	}
 	return nil
 }
 
-func (r *DHCP6Server) readDHCP6Server(resPath string, model *DHCP6ServerModel) (diag.Diagnostics, error) {
+func (r *DHCP6Server) readDHCP6Server(ctx context.Context, resPath string, model *DHCP6ServerModel) (diag.Diagnostics, error) {
 	// Check if resource directory exists
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -511,7 +496,7 @@ func (r *DHCP6Server) readDHCP6Server(resPath string, model *DHCP6ServerModel) (
 	}
 
 	// Check if daemon is actually running
-	running, _, _ := readDHCP6ServerPID(resPath)
+	running, _, _ := readDHCP6ServerPID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
@@ -520,15 +505,15 @@ func (r *DHCP6Server) readDHCP6Server(resPath string, model *DHCP6ServerModel) (
 	// Self-healing: reconcile actual state with desired state
 	if desiredState == "running" && actualState == "stopped" {
 		// Daemon should be running but isn't - restart it
-		tflog.Info(context.Background(), "DHCPv6 server daemon is stopped but should be running, restarting...")
-		if err := r.startDHCP6Server(resPath, model); err != nil {
+		tflog.Info(ctx, "DHCPv6 server daemon is stopped but should be running, restarting...")
+		if err := r.startDHCP6Server(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart DHCPv6 server: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
 		// Daemon should be stopped but is running - stop it
-		tflog.Info(context.Background(), "DHCPv6 server daemon is running but should be stopped, stopping...")
-		if err := r.stopDHCP6Server(resPath); err != nil {
+		tflog.Info(ctx, "DHCPv6 server daemon is running but should be stopped, stopping...")
+		if err := r.stopDHCP6Server(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop DHCPv6 server: %w", err)
 		}
 		actualState = "stopped"
@@ -540,27 +525,22 @@ func (r *DHCP6Server) readDHCP6Server(resPath string, model *DHCP6ServerModel) (
 	return nil, nil
 }
 
-func readDHCP6ServerPID(path string) (bool, *process.Process, error) {
+func readDHCP6ServerPID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }

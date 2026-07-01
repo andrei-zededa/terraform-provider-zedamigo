@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -28,7 +28,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -249,12 +248,12 @@ func (r *InternetMonitor) Create(ctx context.Context, req resource.CreateRequest
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("InternetMonitor Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("InternetMonitor Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -272,7 +271,7 @@ func (r *InternetMonitor) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	confPath := filepath.Join(d, "config.yaml")
-	if err := writeIMConfig(confPath, &data, destinations); err != nil {
+	if err := writeIMConfig(ctx, r.providerConf.Exec, confPath, &data, destinations); err != nil {
 		resp.Diagnostics.AddError("InternetMonitor Resource Error",
 			fmt.Sprintf("Unable to write config file: %s", err))
 		return
@@ -287,14 +286,14 @@ func (r *InternetMonitor) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	if data.State.ValueString() == "running" {
-		if err := r.startInternetMonitor(d, &data); err != nil {
+		if err := r.startInternetMonitor(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("InternetMonitor Resource Error",
 				fmt.Sprintf("Failed to start internet-monitor daemon: %v", err))
 			return
 		}
 	}
 
-	if diags, err := r.readInternetMonitor(d, &data); err != nil {
+	if diags, err := r.readInternetMonitor(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read InternetMonitor state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -315,7 +314,7 @@ func (r *InternetMonitor) Read(ctx context.Context, req resource.ReadRequest, re
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if diags, err := r.readInternetMonitor(d, &data); err != nil {
+	if diags, err := r.readInternetMonitor(ctx, d, &data); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			resp.State.RemoveResource(ctx)
 			return
@@ -375,13 +374,13 @@ func (r *InternetMonitor) Update(ctx context.Context, req resource.UpdateRequest
 		})
 
 		if desiredState == "running" {
-			if err := r.startInternetMonitor(d, &plan); err != nil {
+			if err := r.startInternetMonitor(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("InternetMonitor Resource Update Error",
 					fmt.Sprintf("Failed to start internet-monitor daemon: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopInternetMonitor(d); err != nil {
+			if err := r.stopInternetMonitor(ctx, d); err != nil {
 				resp.Diagnostics.AddError("InternetMonitor Resource Update Error",
 					fmt.Sprintf("Failed to stop internet-monitor daemon: %v", err))
 				return
@@ -391,7 +390,7 @@ func (r *InternetMonitor) Update(ctx context.Context, req resource.UpdateRequest
 		plan.State = types.StringValue(desiredState)
 	}
 
-	if diags, err := r.readInternetMonitor(d, &plan); err != nil {
+	if diags, err := r.readInternetMonitor(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read InternetMonitor state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -410,11 +409,11 @@ func (r *InternetMonitor) Delete(ctx context.Context, req resource.DeleteRequest
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	if err := r.stopInternetMonitor(d); err != nil {
+	if err := r.stopInternetMonitor(ctx, d); err != nil {
 		tflog.Warn(ctx, "Failed to stop internet-monitor daemon during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("InternetMonitor Resource Delete Error",
 			fmt.Sprintf("Can't delete InternetMonitor resource directory: %v", err))
 		return
@@ -426,36 +425,37 @@ func (r *InternetMonitor) ImportState(ctx context.Context, req resource.ImportSt
 }
 
 // startInternetMonitor starts the internet-monitor daemon for the given resource.
-func (r *InternetMonitor) startInternetMonitor(d string, data *InternetMonitorModel) error {
+func (r *InternetMonitor) startInternetMonitor(ctx context.Context, d string, data *InternetMonitorModel) error {
 	netns := ""
 	if !data.NetNS.IsNull() && !data.NetNS.IsUnknown() {
 		netns = data.NetNS.ValueString()
 	}
 
-	srvCmd := os.Args[0]
+	self := r.providerConf.Exec.SelfPath()
+	srvCmd := self
 	srvArgs := []string{}
 	if netns != "" {
 		if r.providerConf.UseSudo {
 			srvCmd = r.providerConf.Sudo
-			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"-n", r.providerConf.IP, "netns", "exec", netns, self}
 		} else {
 			srvCmd = r.providerConf.IP
-			srvArgs = []string{"netns", "exec", netns, os.Args[0]}
+			srvArgs = []string{"netns", "exec", netns, self}
 		}
 	} else if r.providerConf.UseSudo {
 		srvCmd = r.providerConf.Sudo
-		srvArgs = []string{"-n", os.Args[0]}
+		srvArgs = []string{"-n", self}
 	}
 	moreArgs := []string{"-pid-file", data.PIDFile.ValueString(), "-internet-monitor", "-im.config", data.ConfigFile.ValueString()}
-	if res, err := cmd.RunDetached(d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, append(srvArgs, moreArgs...)...); err != nil {
 		return fmt.Errorf("failed to start internet-monitor daemon: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
 // stopInternetMonitor stops the internet-monitor daemon for the given resource.
-func (r *InternetMonitor) stopInternetMonitor(d string) error {
-	running, proc, err := readInternetMonitorPID(d)
+func (r *InternetMonitor) stopInternetMonitor(ctx context.Context, d string) error {
+	running, pid, err := readInternetMonitorPID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find internet-monitor daemon process: %w", err)
 	}
@@ -463,28 +463,14 @@ func (r *InternetMonitor) stopInternetMonitor(d string) error {
 		return nil
 	}
 
-	var killErr error
-	if r.providerConf.UseSudo {
-		killCmd := r.providerConf.Sudo
-		killArgs := []string{"-n", "kill", fmt.Sprintf("%d", proc.Pid)}
-		res, err := cmd.Run(d, killCmd, killArgs...)
-		if err != nil {
-			killErr = err
-		} else if res.ExitCode != 0 {
-			killErr = fmt.Errorf("sudo kill failed with exit code %d: %s", res.ExitCode, res.Stderr)
-		}
-	} else {
-		killErr = proc.Kill()
-	}
-
-	if killErr != nil {
-		return fmt.Errorf("can't kill internet-monitor daemon process: %w", killErr)
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("can't kill internet-monitor daemon process: %w", err)
 	}
 	return nil
 }
 
-func (r *InternetMonitor) readInternetMonitor(resPath string, model *InternetMonitorModel) (diag.Diagnostics, error) {
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+func (r *InternetMonitor) readInternetMonitor(ctx context.Context, resPath string, model *InternetMonitorModel) (diag.Diagnostics, error) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -493,21 +479,21 @@ func (r *InternetMonitor) readInternetMonitor(resPath string, model *InternetMon
 		desiredState = model.State.ValueString()
 	}
 
-	running, _, _ := readInternetMonitorPID(resPath)
+	running, _, _ := readInternetMonitorPID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
 	}
 
 	if desiredState == "running" && actualState == "stopped" {
-		tflog.Info(context.Background(), "Internet monitor daemon is stopped but should be running, restarting...")
-		if err := r.startInternetMonitor(resPath, model); err != nil {
+		tflog.Info(ctx, "Internet monitor daemon is stopped but should be running, restarting...")
+		if err := r.startInternetMonitor(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart internet-monitor daemon: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
-		tflog.Info(context.Background(), "Internet monitor daemon is running but should be stopped, stopping...")
-		if err := r.stopInternetMonitor(resPath); err != nil {
+		tflog.Info(ctx, "Internet monitor daemon is running but should be stopped, stopping...")
+		if err := r.stopInternetMonitor(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop internet-monitor daemon: %w", err)
 		}
 		actualState = "stopped"
@@ -518,38 +504,33 @@ func (r *InternetMonitor) readInternetMonitor(resPath string, model *InternetMon
 	return nil, nil
 }
 
-func readInternetMonitorPID(path string) (bool, *process.Process, error) {
+func readInternetMonitorPID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }
 
-func writeIMConfig(confPath string, data *InternetMonitorModel, destinations []string) error {
+func writeIMConfig(ctx context.Context, ex exec.Executor, confPath string, data *InternetMonitorModel, destinations []string) error {
 	tmpl, err := template.New("im-config").Parse(imConfigTemplateText)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
 	}
 
-	confFile, err := os.Create(confPath)
+	confFile, err := ex.OpenWrite(ctx, confPath, 0o644)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", confPath, err)
 	}

@@ -6,16 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
-	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
+	"syscall"
 	"time"
 
 	_ "embed"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -23,7 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 
 	tpmc "github.com/google/go-tpm-tools/client"
 )
@@ -138,24 +134,24 @@ func (r *SwTPM) Create(ctx context.Context, req resource.CreateRequest, resp *re
 	data.ID = types.StringValue(sum2ID(data.Name.ValueString()))
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(filepath.Join(d, "state"), 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, filepath.Join(d, "state"), 0o700); err != nil {
 		resp.Diagnostics.AddError("SwTPM Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("Disk Image Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
 	}
 
-	if running, _, _ := readMonitorPID(r.providerConf, d); running {
+	if running, _, _ := readMonitorPID(ctx, r.providerConf, d); running {
 		resp.Diagnostics.AddError("SwTPM Resource Error",
 			fmt.Sprintf("Process monitor is already running"))
 		return
 	}
 
-	if err := os.WriteFile(filepath.Join(d, "process_monitor.bash"), processMonitor, 0o755); err != nil {
+	if err := r.providerConf.Exec.WriteFile(ctx, filepath.Join(d, "process_monitor.bash"), processMonitor, 0o755); err != nil {
 		resp.Diagnostics.AddError("SwTPM Resource Error",
 			fmt.Sprintf("Failed to write file: %s", err))
 		return
@@ -176,7 +172,7 @@ func (r *SwTPM) Create(ctx context.Context, req resource.CreateRequest, resp *re
 		"--flags", "not-need-init",
 	}
 
-	res, err := cmd.RunDetached(d, r.providerConf.Bash, cmdArgs...)
+	res, err := r.providerConf.Exec.RunDetached(ctx, d, r.providerConf.Bash, cmdArgs...)
 	if err != nil {
 		resp.Diagnostics.AddError("SwTPM Resource Error",
 			"Failed to run a swtpm process")
@@ -190,7 +186,7 @@ func (r *SwTPM) Create(ctx context.Context, req resource.CreateRequest, resp *re
 
 	time.Sleep(2 * time.Second)
 
-	x, ek, err := readSwTPM(r.providerConf, r.getResourceDir(data.ID.ValueString()))
+	x, ek, err := readSwTPM(ctx, r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
 		resp.Diagnostics.AddWarning("SwTPM Resource Read Error",
 			fmt.Sprintf("Can't read swtpm process details: %v", err))
@@ -205,71 +201,55 @@ func (r *SwTPM) Create(ctx context.Context, req resource.CreateRequest, resp *re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func readMonitorPID(_ *ZedAmigoProviderConfig, path string) (bool, *process.Process, error) {
+func readMonitorPID(ctx context.Context, pConf *ZedAmigoProviderConfig, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "process_monitor.pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := pConf.Exec.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
-	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
-	}
-
-	e, err := p.Exe()
-	if err != nil {
-		return false, p, fmt.Errorf("%w", err)
-	}
-
+	// The PID must be alive AND be our process monitor script.
 	monScript := filepath.Join(path, "process_monitor.bash")
-	if !strings.EqualFold(e, monScript) {
-		return false, p, fmt.Errorf("process %d executable %s != %s", pid, e, monScript)
+	running, err := pConf.Exec.IsRunning(ctx, int(pid), monScript)
+	if err != nil {
+		return false, int(pid), fmt.Errorf("%w", err)
 	}
 
-	return true, p, nil
+	return running, int(pid), nil
 }
 
-func readSwTPMPID(pConf *ZedAmigoProviderConfig, path string) (bool, *process.Process, error) {
+func readSwTPMPID(ctx context.Context, pConf *ZedAmigoProviderConfig, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "swtpm.pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := pConf.Exec.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	// The PID must be alive AND be the swtpm binary.
+	running, err := pConf.Exec.IsRunning(ctx, int(pid), pConf.Swtpm)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), fmt.Errorf("%w", err)
 	}
 
-	e, err := p.Exe()
-	if err != nil {
-		return false, p, fmt.Errorf("%w", err)
-	}
-
-	if !strings.EqualFold(e, pConf.Swtpm) {
-		return false, p, fmt.Errorf("process %d executable %s != %s", pid, e, pConf.Swtpm)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }
 
-func readSwTPM(_ *ZedAmigoProviderConfig, path string) (bool, string, error) {
+func readSwTPM(ctx context.Context, pConf *ZedAmigoProviderConfig, path string) (bool, string, error) {
 	return true, "", nil
 
 	// TODO: Unreachable code, see above.
 	socketPath := filepath.Join(path, "swtpm.socket")
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := pConf.Exec.Dial(ctx, "unix", socketPath, 5*time.Second)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to dial swtpm UNIX socket: %v", err)
 	}
@@ -298,7 +278,7 @@ func (r *SwTPM) Read(ctx context.Context, req resource.ReadRequest, resp *resour
 		return
 	}
 
-	x, ek, err := readSwTPM(r.providerConf, r.getResourceDir(data.ID.ValueString()))
+	x, ek, err := readSwTPM(ctx, r.providerConf, r.getResourceDir(data.ID.ValueString()))
 	if err != nil {
 		resp.Diagnostics.AddWarning("SwTPM Resource Read Warning",
 			fmt.Sprintf("Treating this as a warning since most likely"+
@@ -337,32 +317,32 @@ func (r *SwTPM) Delete(ctx context.Context, req resource.DeleteRequest, resp *re
 
 	d := r.getResourceDir(data.ID.ValueString())
 
-	running, process, err := readSwTPMPID(r.providerConf, d)
+	running, swtpmPID, err := readSwTPMPID(ctx, r.providerConf, d)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Treating SwTPM process related error as a warning", fmt.Sprintf("%v", err))
 	}
 
 	if running {
-		pmrun, pmproc, err := readMonitorPID(r.providerConf, d)
+		pmrun, pmPID, err := readMonitorPID(ctx, r.providerConf, d)
 		if err != nil {
 			resp.Diagnostics.AddWarning("Treating SwTPM process monitor related error as a warning", fmt.Sprintf("%v", err))
 		}
 		// TODO: Seems like the process monitor script doesn't exit as expected after forwarding
 		// the signal to the child.
 		if pmrun {
-			if err := pmproc.Kill(); err != nil {
+			if err := r.providerConf.Exec.Kill(ctx, pmPID, syscall.SIGKILL); err != nil {
 				resp.Diagnostics.AddError("Can't kill SwTPM process monitor", fmt.Sprintf("%v", err))
 				return
 			}
 		} else {
-			if err := process.Kill(); err != nil {
+			if err := r.providerConf.Exec.Kill(ctx, swtpmPID, syscall.SIGKILL); err != nil {
 				resp.Diagnostics.AddError("Can't kill SwTPM process", fmt.Sprintf("%v", err))
 				return
 			}
 		}
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("SwTPM Resource Delete Error",
 			fmt.Sprintf("Can't delete resource directory: %v", err))
 		return

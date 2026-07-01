@@ -5,11 +5,14 @@
 package hypervisor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/matryer/is"
+
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 )
 
 func TestGetCPUThreadIDsFromDir(t *testing.T) {
@@ -32,7 +35,7 @@ func TestGetCPUThreadIDsFromDir(t *testing.T) {
 			is.NoErr(os.WriteFile(filepath.Join(taskPath, "comm"), []byte(tc.comm), 0o644))
 		}
 
-		threads, err := getCPUThreadIDsFromDir(dir, 2)
+		threads, err := getCPUThreadIDsFromDir(context.Background(), exec.NewLocal(false), dir, 2)
 		is.NoErr(err)
 		is.Equal(len(threads), 2)
 		is.Equal(threads[0], 101)
@@ -49,14 +52,14 @@ func TestGetCPUThreadIDsFromDir(t *testing.T) {
 		is.NoErr(os.Mkdir(taskPath, 0o755))
 		is.NoErr(os.WriteFile(filepath.Join(taskPath, "comm"), []byte("CPU 0/KVM\n"), 0o644))
 
-		_, err := getCPUThreadIDsFromDir(dir, 2)
+		_, err := getCPUThreadIDsFromDir(context.Background(), exec.NewLocal(false), dir, 2)
 		is.True(err != nil)
 	})
 
 	t.Run("missing directory", func(t *testing.T) {
 		is := is.New(t)
 
-		_, err := getCPUThreadIDsFromDir("/nonexistent/path", 2)
+		_, err := getCPUThreadIDsFromDir(context.Background(), exec.NewLocal(false), "/nonexistent/path", 2)
 		is.True(err != nil)
 	})
 }

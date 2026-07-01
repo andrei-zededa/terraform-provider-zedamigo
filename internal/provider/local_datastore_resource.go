@@ -6,11 +6,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -21,7 +21,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 const (
@@ -157,7 +156,7 @@ func (r *LocalDatastore) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// Validate that static_dir exists
-	if _, err := os.Stat(data.StaticDir.ValueString()); err != nil {
+	if _, err := r.providerConf.Exec.Stat(ctx, data.StaticDir.ValueString()); err != nil {
 		resp.Diagnostics.AddError("LocalDatastore Resource Error",
 			fmt.Sprintf("Static directory does not exist: %s", err))
 		return
@@ -172,12 +171,12 @@ func (r *LocalDatastore) Create(ctx context.Context, req resource.CreateRequest,
 	data.ID = types.StringValue(id)
 
 	d := r.getResourceDir(data.ID.ValueString())
-	if err := os.MkdirAll(d, 0o700); err != nil {
+	if err := r.providerConf.Exec.MkdirAll(ctx, d, 0o700); err != nil {
 		resp.Diagnostics.AddError("LocalDatastore Resource Error",
 			fmt.Sprintf("Unable to create resource specific directory: %s", err))
 		return
 	}
-	if err := createTFBackPointer(d); err != nil {
+	if err := createTFBackPointer(ctx, r.providerConf.Exec, d); err != nil {
 		resp.Diagnostics.AddError("LocalDatastore Resource Error",
 			fmt.Sprintf("Unable to create resource specific file: %s", err))
 		return
@@ -193,7 +192,7 @@ func (r *LocalDatastore) Create(ctx context.Context, req resource.CreateRequest,
 
 	// Only start the daemon if state is "running"
 	if data.State.ValueString() == "running" {
-		if err := r.startLocalDatastore(d, &data); err != nil {
+		if err := r.startLocalDatastore(ctx, d, &data); err != nil {
 			resp.Diagnostics.AddError("LocalDatastore Resource Error",
 				fmt.Sprintf("Failed to start HTTP server: %v", err))
 			return
@@ -201,7 +200,7 @@ func (r *LocalDatastore) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// Read the LocalDatastore current state.
-	if diags, err := r.readLocalDatastore(d, &data); err != nil {
+	if diags, err := r.readLocalDatastore(ctx, d, &data); err != nil {
 		resp.Diagnostics.AddError("Failed to read LocalDatastore state", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -225,8 +224,8 @@ func (r *LocalDatastore) Read(ctx context.Context, req resource.ReadRequest, res
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Read the LocalDatastore current state.
-	if diags, err := r.readLocalDatastore(d, &data); err != nil {
-		if os.IsNotExist(err) {
+	if diags, err := r.readLocalDatastore(ctx, d, &data); err != nil {
+		if exec.IsNotExist(err) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -266,7 +265,7 @@ func (r *LocalDatastore) Update(ctx context.Context, req resource.UpdateRequest,
 		tflog.Info(ctx, "HTTP server configuration changed, restarting daemon...")
 
 		// Stop the current daemon if running
-		if err := r.stopLocalDatastore(d); err != nil {
+		if err := r.stopLocalDatastore(ctx, d); err != nil {
 			tflog.Warn(ctx, "Failed to stop HTTP server before restart", map[string]any{"error": err.Error()})
 		}
 
@@ -277,7 +276,7 @@ func (r *LocalDatastore) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 
 		if desiredState == "running" {
-			if err := r.startLocalDatastore(d, &plan); err != nil {
+			if err := r.startLocalDatastore(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
 					fmt.Sprintf("Failed to restart HTTP server with new configuration: %v", err))
 				return
@@ -297,13 +296,13 @@ func (r *LocalDatastore) Update(ctx context.Context, req resource.UpdateRequest,
 		})
 
 		if desiredState == "running" {
-			if err := r.startLocalDatastore(d, &plan); err != nil {
+			if err := r.startLocalDatastore(ctx, d, &plan); err != nil {
 				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
 					fmt.Sprintf("Failed to start HTTP server: %v", err))
 				return
 			}
 		} else if desiredState == "stopped" {
-			if err := r.stopLocalDatastore(d); err != nil {
+			if err := r.stopLocalDatastore(ctx, d); err != nil {
 				resp.Diagnostics.AddError("LocalDatastore Resource Update Error",
 					fmt.Sprintf("Failed to stop HTTP server: %v", err))
 				return
@@ -314,7 +313,7 @@ func (r *LocalDatastore) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Read back the current state to verify
-	if diags, err := r.readLocalDatastore(d, &plan); err != nil {
+	if diags, err := r.readLocalDatastore(ctx, d, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read LocalDatastore state after update", err.Error())
 		resp.Diagnostics.Append(diags...)
 		return
@@ -336,12 +335,12 @@ func (r *LocalDatastore) Delete(ctx context.Context, req resource.DeleteRequest,
 	d := r.getResourceDir(data.ID.ValueString())
 
 	// Stop the HTTP server process if it's running.
-	if err := r.stopLocalDatastore(d); err != nil {
+	if err := r.stopLocalDatastore(ctx, d); err != nil {
 		// Log as warning instead of error, since the daemon might already be stopped
 		tflog.Warn(ctx, "Failed to stop HTTP server during delete", map[string]any{"error": err.Error()})
 	}
 
-	if err := os.RemoveAll(d); err != nil {
+	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
 		resp.Diagnostics.AddError("LocalDatastore Resource Delete Error",
 			fmt.Sprintf("Can't delete LocalDatastore resource directory: %v", err))
 		return
@@ -353,8 +352,8 @@ func (r *LocalDatastore) ImportState(ctx context.Context, req resource.ImportSta
 }
 
 // startLocalDatastore starts the HTTP server daemon for the given resource
-func (r *LocalDatastore) startLocalDatastore(d string, data *LocalDatastoreModel) error {
-	srvCmd := os.Args[0]
+func (r *LocalDatastore) startLocalDatastore(ctx context.Context, d string, data *LocalDatastoreModel) error {
+	srvCmd := r.providerConf.Exec.SelfPath()
 	args := []string{"-pid-file", data.PIDFile.ValueString(), "-http-server"}
 
 	// Add optional arguments
@@ -376,15 +375,15 @@ func (r *LocalDatastore) startLocalDatastore(d string, data *LocalDatastoreModel
 		args = append(args, "-hs.password", data.Password.ValueString())
 	}
 
-	if res, err := cmd.RunDetached(d, srvCmd, args...); err != nil {
+	if res, err := r.providerConf.Exec.RunDetached(ctx, d, srvCmd, args...); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w, diagnostics: %v", err, res.Diagnostics())
 	}
 	return nil
 }
 
 // stopLocalDatastore stops the HTTP server daemon for the given resource
-func (r *LocalDatastore) stopLocalDatastore(d string) error {
-	running, proc, err := readLocalDatastorePID(d)
+func (r *LocalDatastore) stopLocalDatastore(ctx context.Context, d string) error {
+	running, pid, err := readLocalDatastorePID(ctx, r.providerConf.Exec, d)
 	if err != nil {
 		return fmt.Errorf("can't find HTTP server process: %w", err)
 	}
@@ -392,15 +391,15 @@ func (r *LocalDatastore) stopLocalDatastore(d string) error {
 		return nil // Already stopped
 	}
 
-	if err := proc.Kill(); err != nil {
+	if err := r.providerConf.Exec.Kill(ctx, pid, syscall.SIGKILL); err != nil {
 		return fmt.Errorf("can't kill HTTP server process: %w", err)
 	}
 	return nil
 }
 
-func (r *LocalDatastore) readLocalDatastore(resPath string, model *LocalDatastoreModel) (diag.Diagnostics, error) {
+func (r *LocalDatastore) readLocalDatastore(ctx context.Context, resPath string, model *LocalDatastoreModel) (diag.Diagnostics, error) {
 	// Check if resource directory exists
-	if _, err := os.Stat(resPath); os.IsNotExist(err) {
+	if _, err := r.providerConf.Exec.Stat(ctx, resPath); exec.IsNotExist(err) {
 		return nil, fmt.Errorf("resource directory does not exist")
 	}
 
@@ -411,7 +410,7 @@ func (r *LocalDatastore) readLocalDatastore(resPath string, model *LocalDatastor
 	}
 
 	// Check if daemon is actually running
-	running, _, _ := readLocalDatastorePID(resPath)
+	running, _, _ := readLocalDatastorePID(ctx, r.providerConf.Exec, resPath)
 	actualState := "stopped"
 	if running {
 		actualState = "running"
@@ -420,15 +419,15 @@ func (r *LocalDatastore) readLocalDatastore(resPath string, model *LocalDatastor
 	// Self-healing: reconcile actual state with desired state
 	if desiredState == "running" && actualState == "stopped" {
 		// Daemon should be running but isn't - restart it
-		tflog.Info(context.Background(), "HTTP server daemon is stopped but should be running, restarting...")
-		if err := r.startLocalDatastore(resPath, model); err != nil {
+		tflog.Info(ctx, "HTTP server daemon is stopped but should be running, restarting...")
+		if err := r.startLocalDatastore(ctx, resPath, model); err != nil {
 			return nil, fmt.Errorf("failed to restart HTTP server: %w", err)
 		}
 		actualState = "running"
 	} else if desiredState == "stopped" && actualState == "running" {
 		// Daemon should be stopped but is running - stop it
-		tflog.Info(context.Background(), "HTTP server daemon is running but should be stopped, stopping...")
-		if err := r.stopLocalDatastore(resPath); err != nil {
+		tflog.Info(ctx, "HTTP server daemon is running but should be stopped, stopping...")
+		if err := r.stopLocalDatastore(ctx, resPath); err != nil {
 			return nil, fmt.Errorf("failed to stop HTTP server: %w", err)
 		}
 		actualState = "stopped"
@@ -440,27 +439,22 @@ func (r *LocalDatastore) readLocalDatastore(resPath string, model *LocalDatastor
 	return nil, nil
 }
 
-func readLocalDatastorePID(path string) (bool, *process.Process, error) {
+func readLocalDatastorePID(ctx context.Context, ex exec.Executor, path string) (bool, int, error) {
 	pidPath := filepath.Join(path, "pid")
-	x, err := os.ReadFile(pidPath)
+	x, err := ex.ReadFile(ctx, pidPath)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
 	pid, err := strconv.ParseInt(string(bytes.TrimSpace(x)), 10, 32)
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, 0, fmt.Errorf("%w", err)
 	}
 
-	p, err := process.NewProcess(int32(pid))
+	running, err := ex.IsRunning(ctx, int(pid), "")
 	if err != nil {
-		return false, nil, fmt.Errorf("%w", err)
+		return false, int(pid), err
 	}
 
-	running, err := p.IsRunning()
-	if err != nil || !running {
-		return false, p, fmt.Errorf("process %d is not running", pid)
-	}
-
-	return true, p, nil
+	return running, int(pid), nil
 }
