@@ -41,6 +41,11 @@ provider "zedamigo" {
   #   # host_key                 = "ssh-ed25519 AAAA..."
   #   # insecure_ignore_host_key = false     # INSECURE; dev/test only
   #
+  #   # Tunnel through a jump/bastion host (OpenSSH ProxyJump). Reuses the auth
+  #   # above; comma-separate for a chain. Jump host keys are verified via
+  #   # known_hosts_file (or insecure_ignore_host_key). Env: ZEDAMIGO_SSH_PROXY_JUMP.
+  #   # proxy_jump = "root@localhost:11022"
+  #
   #   # Path to the provider binary on the remote host (used by the self-invoked
   #   # daemons). If unset, it is bootstrapped via the install script pinned to
   #   # this provider's version (which fetches the binary for the remote arch).

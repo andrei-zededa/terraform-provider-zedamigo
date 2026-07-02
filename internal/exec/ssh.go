@@ -30,11 +30,23 @@ import (
 // time), so they do not depend on this.
 const remotePATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+// JumpHost describes one intermediate hop for a ProxyJump-style connection: the
+// SSH connection to the target is tunneled through the jump host(s), in order.
+type JumpHost struct {
+	Addr         string // host:port of the jump host
+	ClientConfig *ssh.ClientConfig
+}
+
 // SSHParams configures a SSHExecutor.
 type SSHParams struct {
 	Addr         string // host:port
 	ClientConfig *ssh.ClientConfig
-	UseSudo      bool
+	// Jumps is an ordered chain of jump/bastion hosts to tunnel through
+	// (OpenSSH ProxyJump). The first entry is dialed directly; each subsequent
+	// hop, and finally the target, is reached through the previous one. Empty
+	// means a direct connection to the target.
+	Jumps   []JumpHost
+	UseSudo bool
 }
 
 // SSHExecutor runs operations on a remote host over SSH. Commands run through
@@ -44,13 +56,15 @@ type SSHParams struct {
 type SSHExecutor struct {
 	addr    string
 	cfg     *ssh.ClientConfig
+	jumps   []JumpHost
 	useSudo bool
 
-	mu       sync.Mutex
-	client   *ssh.Client
-	sftp     *sftp.Client
-	done     chan struct{} // closed by Close to stop the keepalive goroutine
-	detached string        // "setsid" or "nohup", detected once
+	mu          sync.Mutex
+	client      *ssh.Client
+	jumpClients []*ssh.Client // intermediate hops, in dial order; closed after client
+	sftp        *sftp.Client
+	done        chan struct{} // closed by Close to stop the keepalive goroutine
+	detached    string        // "setsid" or "nohup", detected once
 
 	selfPath string // path to the provider binary on the target
 }
@@ -65,6 +79,7 @@ func NewSSH(p SSHParams) *SSHExecutor {
 	return &SSHExecutor{
 		addr:    p.Addr,
 		cfg:     p.ClientConfig,
+		jumps:   p.Jumps,
 		useSudo: p.UseSudo,
 		done:    make(chan struct{}),
 	}
@@ -78,7 +93,8 @@ func (e *SSHExecutor) SelfPath() string { return e.selfPath }
 // by the provider after bootstrapping the binary onto the remote host.
 func (e *SSHExecutor) SetSelfPath(p string) { e.selfPath = p }
 
-// conn lazily establishes the SSH connection and SFTP client.
+// conn lazily establishes the SSH connection (tunneling through any configured
+// jump hosts) and the SFTP client.
 func (e *SSHExecutor) conn(_ context.Context) (*ssh.Client, *sftp.Client, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -87,28 +103,102 @@ func (e *SSHExecutor) conn(_ context.Context) (*ssh.Client, *sftp.Client, error)
 		return e.client, e.sftp, nil
 	}
 
-	client, err := ssh.Dial("tcp", e.addr, e.cfg)
+	client, jumpClients, err := e.dial()
 	if err != nil {
-		return nil, nil, fmt.Errorf("ssh dial %s: %w", e.addr, err)
+		return nil, nil, err
 	}
 
 	sc, err := sftp.NewClient(client)
 	if err != nil {
 		client.Close()
+		closeClients(jumpClients)
 		return nil, nil, fmt.Errorf("sftp client: %w", err)
 	}
 
 	e.client = client
+	e.jumpClients = jumpClients
 	e.sftp = sc
 
 	// Keepalive so long idle periods (e.g. during a multi-minute QEMU install)
-	// don't get the connection dropped by an idle timeout or NAT.
-	go e.keepalive(client)
+	// don't get the connection dropped by an idle timeout or NAT. Every hop is
+	// pinged, since the target connection is tunneled through the jump hosts.
+	go e.keepalive(append([]*ssh.Client{client}, jumpClients...))
 
 	return client, sc, nil
 }
 
-func (e *SSHExecutor) keepalive(client *ssh.Client) {
+// dial establishes the SSH connection to the target, tunneling through the
+// configured jump hosts in order. It returns the target client plus the ordered
+// intermediate jump clients, which must stay open for the lifetime of the
+// target connection and be closed after it.
+func (e *SSHExecutor) dial() (*ssh.Client, []*ssh.Client, error) {
+	if len(e.jumps) == 0 {
+		client, err := ssh.Dial("tcp", e.addr, e.cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ssh dial %s: %w", e.addr, err)
+		}
+		return client, nil, nil
+	}
+
+	var jumpClients []*ssh.Client
+	ok := false
+	defer func() {
+		if !ok {
+			closeClients(jumpClients)
+		}
+	}()
+
+	// The first hop is dialed directly.
+	first := e.jumps[0]
+	jc, err := ssh.Dial("tcp", first.Addr, first.ClientConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ssh dial jump host %s: %w", first.Addr, err)
+	}
+	jumpClients = append(jumpClients, jc)
+
+	// Each subsequent hop is reached through the previous one.
+	for i := 1; i < len(e.jumps); i++ {
+		hop := e.jumps[i]
+		next, err := tunnel(jumpClients[i-1], hop.Addr, hop.ClientConfig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ssh dial jump host %s: %w", hop.Addr, err)
+		}
+		jumpClients = append(jumpClients, next)
+	}
+
+	// Finally reach the target through the last jump host.
+	target, err := tunnel(jumpClients[len(jumpClients)-1], e.addr, e.cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ssh dial target %s via jump host: %w", e.addr, err)
+	}
+
+	ok = true
+	return target, jumpClients, nil
+}
+
+// tunnel opens a TCP connection to addr through the via client and completes an
+// SSH handshake over it, returning a client for addr.
+func tunnel(via *ssh.Client, addr string, cfg *ssh.ClientConfig) (*ssh.Client, error) {
+	conn, err := via.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return ssh.NewClient(ncc, chans, reqs), nil
+}
+
+// closeClients closes clients in reverse order (innermost tunnel first).
+func closeClients(clients []*ssh.Client) {
+	for i := len(clients) - 1; i >= 0; i-- {
+		clients[i].Close()
+	}
+}
+
+func (e *SSHExecutor) keepalive(clients []*ssh.Client) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
@@ -116,8 +206,10 @@ func (e *SSHExecutor) keepalive(client *ssh.Client) {
 		case <-e.done:
 			return
 		case <-t.C:
-			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
-				return
+			for _, c := range clients {
+				if _, _, err := c.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+					return
+				}
 			}
 		}
 	}
@@ -142,6 +234,14 @@ func (e *SSHExecutor) Close() error {
 		}
 		e.client = nil
 	}
+	// Close jump clients after the target, since the target connection tunnels
+	// through them (innermost first).
+	for i := len(e.jumpClients) - 1; i >= 0; i-- {
+		if cerr := e.jumpClients[i].Close(); err == nil {
+			err = cerr
+		}
+	}
+	e.jumpClients = nil
 	return err
 }
 

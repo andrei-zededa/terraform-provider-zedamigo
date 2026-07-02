@@ -21,20 +21,50 @@ terraform {
 }
 
 provider "zedamigo" {
-  # Target host on which the zedamigo provider will execute commands and
-  # create resources. ONLY `localhost` is currently supported. Optional and
-  # if not specified it defaults to `localhost`.
+  # Target host on which the zedamigo provider will execute commands and create
+  # resources. Defaults to `localhost` (everything runs on the machine running
+  # the provider). Set it to a hostname or IP address to operate on a remote
+  # host over SSH (configure the connection in the `ssh` block below). Optional.
   target = "localhost"
 
   # The provider lib directory, where all disk images and other files are
   # created on `target`. Optional and if not specified it defaults to
-  # `$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`.
+  # `$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`. For a
+  # remote `target` the default is resolved from the remote host's environment.
   # lib_path = ""
 
   # Use `sudo` for running specific (but not all) commands that need to
   # be executed as the root user. Optional and if not specified it defaults
   # to `false`.
   # use_sudo = false
+
+  # When `target` is a remote host, configure the SSH connection here. All
+  # attributes are optional and each has a ZEDAMIGO_SSH_* environment fallback.
+  # Provide at least one authentication method: password, private_key /
+  # private_key_file, or use_agent.
+  #
+  # ssh {
+  #   user             = "andrei"            # default: current local user
+  #   port             = 22
+  #   private_key_file = "~/.ssh/id_ed25519" # or: private_key = "<PEM>"
+  #   # password       = "..."
+  #   # use_agent      = true                # use $SSH_AUTH_SOCK
+  #
+  #   # Host key verification (fails closed): defaults to ~/.ssh/known_hosts.
+  #   # known_hosts_file         = "~/.ssh/known_hosts"
+  #   # host_key                 = "ssh-ed25519 AAAA..."
+  #   # insecure_ignore_host_key = false     # INSECURE; dev/test only
+  #
+  #   # Tunnel through a jump/bastion host (OpenSSH ProxyJump). Reuses the auth
+  #   # above; comma-separate for a chain. Jump host keys are verified via
+  #   # known_hosts_file (or insecure_ignore_host_key). Env: ZEDAMIGO_SSH_PROXY_JUMP.
+  #   # proxy_jump = "root@localhost:11022"
+  #
+  #   # Path to the provider binary on the remote host (used by the self-invoked
+  #   # daemons). If unset, it is bootstrapped via the install script pinned to
+  #   # this provider's version (which fetches the binary for the remote arch).
+  #   # remote_binary_path = ""
+  # }
 }
 ```
 
@@ -45,10 +75,35 @@ provider "zedamigo" {
 
 - `lib_path` (String) The provider lib directory, where all disk images and other files are
 created on `target`. Optional and if not specified it defaults to
-`$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`.
+`$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`. For a
+remote `target` the default is resolved from the remote host's
+environment.
+- `ssh` (Block, Optional) SSH connection settings used when `target` is a remote host (anything other than
+`localhost`). All attributes are optional and each has a `ZEDAMIGO_SSH_*` environment
+variable fallback. Provide at least one authentication method: `password`,
+`private_key`/`private_key_file`, or `use_agent`. (see [below for nested schema](#nestedblock--ssh))
 - `target` (String) Target host on which the zedamigo provider will execute commands and
-create resources. ONLY `localhost` is currently supported. Optional and
-if not specified it defaults to `localhost`.
+create resources. Defaults to `localhost` (run everything locally). Set
+it to a hostname or IP address to operate on a remote host over SSH; in
+that case configure the connection in the `ssh` block. Optional.
 - `use_sudo` (Boolean) Use `sudo` for running specific (but not all) commands that need to
 be executed as the root user. Optional and if not specified it defaults
 to `false`.
+
+<a id="nestedblock--ssh"></a>
+### Nested Schema for `ssh`
+
+Optional:
+
+- `host_key` (String) Pinned host public key in authorized_keys line format. Env: ZEDAMIGO_SSH_HOST_KEY.
+- `insecure_ignore_host_key` (Boolean) Skip host key verification (INSECURE; dev/test only). Env: ZEDAMIGO_SSH_INSECURE.
+- `known_hosts_file` (String) Path to a known_hosts file for host key verification. Defaults to ~/.ssh/known_hosts if present. Env: ZEDAMIGO_SSH_KNOWN_HOSTS.
+- `password` (String, Sensitive) SSH password. Env: ZEDAMIGO_SSH_PASSWORD.
+- `port` (Number) SSH port. Defaults to 22. Env: ZEDAMIGO_SSH_PORT.
+- `private_key` (String, Sensitive) SSH private key material (PEM). Env: ZEDAMIGO_SSH_PRIVATE_KEY.
+- `private_key_file` (String) Path to a SSH private key file (read locally). Env: ZEDAMIGO_SSH_PRIVATE_KEY_FILE.
+- `private_key_passphrase` (String, Sensitive) Passphrase for an encrypted private key. Env: ZEDAMIGO_SSH_PRIVATE_KEY_PASSPHRASE.
+- `proxy_jump` (String) Jump/bastion host(s) to tunnel the connection through, in OpenSSH ProxyJump format: [user@]host[:port], comma-separated for a chain (e.g. "root@localhost:11022"). Jump hosts reuse the target's authentication (password/keys/agent) and, for host key verification, its known_hosts_file or insecure_ignore_host_key (host_key applies only to the final target). Env: ZEDAMIGO_SSH_PROXY_JUMP.
+- `remote_binary_path` (String) Path to the provider binary on the remote host (used by self-invoked daemons). If unset, the binary is bootstrapped via the install script for the provider's version. Env: ZEDAMIGO_REMOTE_BINARY_PATH.
+- `use_agent` (Boolean) Use the SSH agent at $SSH_AUTH_SOCK for public-key auth. Env: ZEDAMIGO_SSH_USE_AGENT.
+- `user` (String) SSH username. Defaults to the current local user. Env: ZEDAMIGO_SSH_USER.

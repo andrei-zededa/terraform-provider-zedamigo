@@ -413,3 +413,99 @@ func TestSSHHostKeyMismatch(t *testing.T) {
 		t.Fatal("expected host key mismatch to fail the connection")
 	}
 }
+
+// clientConfig builds a client config with key auth and a pinned host key.
+func clientConfig(signer ssh.Signer, hostKey ssh.PublicKey) *ssh.ClientConfig {
+	return &ssh.ClientConfig{
+		User:            "tester",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.FixedHostKey(hostKey),
+		Timeout:         5 * time.Second,
+	}
+}
+
+// TestSSHProxyJump verifies that the executor tunnels the target connection
+// through a single jump host, exercising both command execution and SFTP (log
+// writing) over the tunnel.
+func TestSSHProxyJump(t *testing.T) {
+	clientSigner := genSigner(t)
+	// The jump host must allow direct-tcpip forwarding so the target connection
+	// can be tunneled through it.
+	jumpAddr, jumpKey := newTestServer(t, testServerOpts{
+		authorizedKey: clientSigner.PublicKey(), allowTCPFwd: true,
+	})
+	targetAddr, targetKey := newTestServer(t, testServerOpts{
+		authorizedKey: clientSigner.PublicKey(),
+	})
+
+	e := exec.NewSSH(exec.SSHParams{
+		Addr:         targetAddr,
+		ClientConfig: clientConfig(clientSigner, targetKey),
+		Jumps: []exec.JumpHost{
+			{Addr: jumpAddr, ClientConfig: clientConfig(clientSigner, jumpKey)},
+		},
+	})
+	t.Cleanup(func() { _ = e.Close() })
+
+	res, err := e.Run(context.Background(), t.TempDir(), "echo", "via jump")
+	if err != nil {
+		t.Fatalf("Run via jump: %v", err)
+	}
+	if strings.TrimSpace(res.Stdout) != "via jump" {
+		t.Fatalf("stdout = %q, want %q", res.Stdout, "via jump")
+	}
+}
+
+// TestSSHProxyJumpChain verifies tunneling through a chain of two jump hosts.
+func TestSSHProxyJumpChain(t *testing.T) {
+	clientSigner := genSigner(t)
+	jump1Addr, jump1Key := newTestServer(t, testServerOpts{authorizedKey: clientSigner.PublicKey(), allowTCPFwd: true})
+	jump2Addr, jump2Key := newTestServer(t, testServerOpts{authorizedKey: clientSigner.PublicKey(), allowTCPFwd: true})
+	targetAddr, targetKey := newTestServer(t, testServerOpts{authorizedKey: clientSigner.PublicKey()})
+
+	e := exec.NewSSH(exec.SSHParams{
+		Addr:         targetAddr,
+		ClientConfig: clientConfig(clientSigner, targetKey),
+		Jumps: []exec.JumpHost{
+			{Addr: jump1Addr, ClientConfig: clientConfig(clientSigner, jump1Key)},
+			{Addr: jump2Addr, ClientConfig: clientConfig(clientSigner, jump2Key)},
+		},
+	})
+	t.Cleanup(func() { _ = e.Close() })
+
+	res, err := e.Run(context.Background(), t.TempDir(), "echo", "chain")
+	if err != nil {
+		t.Fatalf("Run via jump chain: %v", err)
+	}
+	if strings.TrimSpace(res.Stdout) != "chain" {
+		t.Fatalf("stdout = %q, want %q", res.Stdout, "chain")
+	}
+}
+
+// TestSSHProxyJumpBadJump verifies that a failure dialing the jump host surfaces
+// as an error (and does not hang) rather than reaching the target.
+func TestSSHProxyJumpBadJump(t *testing.T) {
+	clientSigner := genSigner(t)
+	targetAddr, targetKey := newTestServer(t, testServerOpts{authorizedKey: clientSigner.PublicKey()})
+
+	// A closed listener address for the jump host: dialing it must fail.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadJump := ln.Addr().String()
+	_ = ln.Close()
+
+	e := exec.NewSSH(exec.SSHParams{
+		Addr:         targetAddr,
+		ClientConfig: clientConfig(clientSigner, targetKey),
+		Jumps: []exec.JumpHost{
+			{Addr: deadJump, ClientConfig: clientConfig(clientSigner, targetKey)},
+		},
+	})
+	t.Cleanup(func() { _ = e.Close() })
+
+	if _, err := e.Run(context.Background(), t.TempDir(), "true"); err == nil {
+		t.Fatal("expected an error when the jump host is unreachable")
+	}
+}

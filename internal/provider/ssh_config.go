@@ -38,6 +38,7 @@ type SSHModel struct {
 	KnownHostsFile        types.String `tfsdk:"known_hosts_file"`
 	HostKey               types.String `tfsdk:"host_key"`
 	InsecureIgnoreHostKey types.Bool   `tfsdk:"insecure_ignore_host_key"`
+	ProxyJump             types.String `tfsdk:"proxy_jump"`
 	RemoteBinaryPath      types.String `tfsdk:"remote_binary_path"`
 }
 
@@ -94,6 +95,10 @@ func sshSchemaBlock() schema.Block {
 				Description: "Skip host key verification (INSECURE; dev/test only). Env: ZEDAMIGO_SSH_INSECURE.",
 				Optional:    true,
 			},
+			"proxy_jump": schema.StringAttribute{
+				Description: "Jump/bastion host(s) to tunnel the connection through, in OpenSSH ProxyJump format: [user@]host[:port], comma-separated for a chain (e.g. \"root@localhost:11022\"). Jump hosts reuse the target's authentication (password/keys/agent) and, for host key verification, its known_hosts_file or insecure_ignore_host_key (host_key applies only to the final target). Env: ZEDAMIGO_SSH_PROXY_JUMP.",
+				Optional:    true,
+			},
 			"remote_binary_path": schema.StringAttribute{
 				Description: "Path to the provider binary on the remote host (used by self-invoked daemons). If unset, the binary is bootstrapped via the install script for the provider's version. Env: ZEDAMIGO_REMOTE_BINARY_PATH.",
 				Optional:    true,
@@ -115,14 +120,88 @@ func buildSSHExecutor(target string, m *SSHModel, useSudo bool) (*exec.SSHExecut
 		return nil, err
 	}
 
+	jumps, err := buildSSHJumpChain(m, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	port := sshPort(m.Port, "ZEDAMIGO_SSH_PORT")
 	addr := net.JoinHostPort(target, strconv.FormatInt(port, 10))
 
 	return exec.NewSSH(exec.SSHParams{
 		Addr:         addr,
 		ClientConfig: cfg,
+		Jumps:        jumps,
 		UseSudo:      useSudo,
 	}), nil
+}
+
+// buildSSHJumpChain parses the ssh.proxy_jump specification into an ordered
+// chain of jump hosts. Each hop reuses the target's authentication methods and,
+// unless overridden by a user@ prefix, its username; host key verification for
+// jump hosts uses known_hosts or insecure_ignore_host_key. It returns nil when
+// no proxy_jump is configured.
+func buildSSHJumpChain(m *SSHModel, target *ssh.ClientConfig) ([]exec.JumpHost, error) {
+	spec := sshStr(m.ProxyJump, "ZEDAMIGO_SSH_PROXY_JUMP")
+	if spec == "" {
+		return nil, nil
+	}
+
+	hostKeyCB, err := buildJumpHostKeyCallback(m)
+	if err != nil {
+		return nil, err
+	}
+
+	var hops []exec.JumpHost
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		user, host, port := parseJumpSpec(part)
+		if user == "" {
+			user = target.User
+		}
+		hops = append(hops, exec.JumpHost{
+			Addr: net.JoinHostPort(host, port),
+			ClientConfig: &ssh.ClientConfig{
+				User:            user,
+				Auth:            target.Auth,
+				HostKeyCallback: hostKeyCB,
+				Timeout:         target.Timeout,
+			},
+		})
+	}
+	if len(hops) == 0 {
+		return nil, fmt.Errorf("ssh.proxy_jump %q did not specify any jump hosts", spec)
+	}
+	return hops, nil
+}
+
+// parseJumpSpec parses a single OpenSSH ProxyJump entry ([user@]host[:port]).
+// A missing port defaults to 22; a missing user is returned empty so the caller
+// can apply its default.
+func parseJumpSpec(spec string) (user, host, port string) {
+	hostport := spec
+	if u, hp, found := strings.Cut(spec, "@"); found {
+		user = u
+		hostport = hp
+	}
+	host, port = splitHostPortDefault(hostport, "22")
+	return user, host, port
+}
+
+// splitHostPortDefault splits host:port, defaulting the port when absent and
+// stripping the brackets from a bare IPv6 literal.
+func splitHostPortDefault(hostport, defPort string) (host, port string) {
+	if h, p, err := net.SplitHostPort(hostport); err == nil {
+		return h, p
+	}
+	h := hostport
+	if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+		h = h[1 : len(h)-1]
+	}
+	return h, defPort
 }
 
 func buildSSHClientConfig(m *SSHModel) (*ssh.ClientConfig, error) {
@@ -210,6 +289,41 @@ func buildHostKeyCallback(m *SSHModel) (ssh.HostKeyCallback, error) {
 		return ssh.FixedHostKey(pub), nil
 	}
 
+	cb, err := knownHostsCallback(m)
+	if err != nil {
+		return nil, err
+	}
+	if cb != nil {
+		return cb, nil
+	}
+
+	return nil, fmt.Errorf("no SSH host key verification configured: set ssh.known_hosts_file or ssh.host_key, or (insecurely, for dev/test) ssh.insecure_ignore_host_key")
+}
+
+// buildJumpHostKeyCallback builds the host key verification callback used for
+// jump hosts. Unlike the target, a single pinned ssh.host_key cannot verify the
+// (potentially several, distinct) jump hosts, so only known_hosts or the
+// insecure opt-out are accepted; it fails closed otherwise.
+func buildJumpHostKeyCallback(m *SSHModel) (ssh.HostKeyCallback, error) {
+	if sshBool(m.InsecureIgnoreHostKey, "ZEDAMIGO_SSH_INSECURE") {
+		return ssh.InsecureIgnoreHostKey(), nil //nolint:gosec // explicit opt-in for dev/test
+	}
+
+	cb, err := knownHostsCallback(m)
+	if err != nil {
+		return nil, err
+	}
+	if cb != nil {
+		return cb, nil
+	}
+
+	return nil, fmt.Errorf("ssh.proxy_jump requires host key verification for the jump host(s): set ssh.known_hosts_file, or (insecurely, for dev/test) ssh.insecure_ignore_host_key (ssh.host_key applies only to the final target)")
+}
+
+// knownHostsCallback returns a host key callback based on the configured
+// known_hosts file, falling back to ~/.ssh/known_hosts when present. It returns
+// (nil, nil) when no known_hosts file is configured or found.
+func knownHostsCallback(m *SSHModel) (ssh.HostKeyCallback, error) {
 	khFile := sshStr(m.KnownHostsFile, "ZEDAMIGO_SSH_KNOWN_HOSTS")
 	if khFile == "" {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -219,15 +333,14 @@ func buildHostKeyCallback(m *SSHModel) (ssh.HostKeyCallback, error) {
 			}
 		}
 	}
-	if khFile != "" {
-		cb, err := knownhosts.New(expandHome(khFile))
-		if err != nil {
-			return nil, fmt.Errorf("can't load known_hosts file %q: %w", khFile, err)
-		}
-		return cb, nil
+	if khFile == "" {
+		return nil, nil
 	}
-
-	return nil, fmt.Errorf("no SSH host key verification configured: set ssh.known_hosts_file or ssh.host_key, or (insecurely, for dev/test) ssh.insecure_ignore_host_key")
+	cb, err := knownhosts.New(expandHome(khFile))
+	if err != nil {
+		return nil, fmt.Errorf("can't load known_hosts file %q: %w", khFile, err)
+	}
+	return cb, nil
 }
 
 // resolveRemoteLibPath resolves the default lib_path on the remote host from
