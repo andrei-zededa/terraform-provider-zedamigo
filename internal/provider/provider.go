@@ -52,6 +52,7 @@ type ZedAmigoProviderConfig struct {
 	Docker      string
 	Swtpm       string
 	Bash        string
+	Flock       string // Used by host_reservation_resource (util-linux flock)
 	GenISOImage string
 	IP          string
 	Hypervisor  hypervisor.Hypervisor
@@ -332,6 +333,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewNetNS,
 		NewInternetMonitor,
 		NewMonitorSystemUsage,
+		NewHostReservation,
 	}
 }
 

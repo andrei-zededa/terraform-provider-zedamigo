@@ -85,6 +85,18 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 		return
 	}
 
+	// flock (optional; required only by the host_reservation resource).
+	flock, err := zaConf.Exec.LookPath(ctx, "flock")
+	if err != nil {
+		resp.Diagnostics.AddWarning("Can't find the `flock` executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the host_reservation resource. Can't find `flock`, got error: %v", err))
+	} else {
+		zaConf.Flock = flock
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// swtpm (optional).
 	st, err := zaConf.Exec.LookPath(ctx, "swtpm")
 	if err != nil {
