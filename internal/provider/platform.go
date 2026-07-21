@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//go:build linux && amd64
-
 package provider
 
 import (
@@ -16,13 +14,48 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// Embed OVMF files.
+// Embed OVMF files. These are used by the QEMU hypervisor (Linux targets) and
+// are extracted onto the target during Configure. They are embedded in every
+// build so that a provider running on any host can drive a remote Linux target.
 //
 //go:embed embedded_ovmf/OVMF_CODE.fd
 //go:embed embedded_ovmf/OVMF_VARS.fd
 var embeddedOVMF embed.FS
 
+// configurePlatformTools looks up the tools and constructs the hypervisor for
+// the TARGET host, selected by the target's OS (detected during Configure)
+// rather than by the provider's build platform. This lets a provider built for
+// one OS (e.g. macOS) drive a remote host of another OS (e.g. Linux) over SSH.
 func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
+	switch zaConf.TargetOS {
+	case "linux":
+		configureQEMU(ctx, zaConf, resp)
+	case "darwin":
+		// The vfkit backend is not executor-based; it only supports a local
+		// target running natively on macOS.
+		if !zaConf.Exec.IsLocal() {
+			resp.Diagnostics.AddError(
+				"Remote macOS target not supported",
+				"The macOS (vfkit) backend can only manage a local target. To use a remote macOS host, "+
+					"run the provider natively on that host with target = \"localhost\". Remote targets are "+
+					"supported for Linux hosts (QEMU) only.",
+			)
+			return
+		}
+		configureVFKit(ctx, zaConf, resp)
+	default:
+		resp.Diagnostics.AddError(
+			"Unsupported target OS",
+			fmt.Sprintf("The target host OS %q is not supported (only linux and darwin are).", zaConf.TargetOS),
+		)
+	}
+}
+
+// configureQEMU looks up the QEMU toolchain on the target and constructs the
+// executor-based QEMUHypervisor. It works against a local or remote Linux
+// target. All lookups and the OVMF extraction go through zaConf.Exec, so they
+// resolve on the target host.
+func configureQEMU(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
 	// Extract OVMF files onto the target.
 	if err := zaConf.Exec.MkdirAll(ctx, filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
 		resp.Diagnostics.AddError(

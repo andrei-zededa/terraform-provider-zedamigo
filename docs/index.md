@@ -85,7 +85,10 @@ variable fallback. Provide at least one authentication method: `password`,
 - `target` (String) Target host on which the zedamigo provider will execute commands and
 create resources. Defaults to `localhost` (run everything locally). Set
 it to a hostname or IP address to operate on a remote host over SSH; in
-that case configure the connection in the `ssh` block. Optional.
+that case configure the connection in the `ssh` block. A remote target
+must be a **Linux** host (the QEMU backend is used); the provider can run
+on any supported host (e.g. macOS) and does not need qemu/vfkit installed
+locally for a remote Linux target. macOS targets are local-only. Optional.
 - `use_sudo` (Boolean) Use `sudo` for running specific (but not all) commands that need to
 be executed as the root user. Optional and if not specified it defaults
 to `false`.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -45,6 +46,8 @@ var (
 // resources of the provider.
 type ZedAmigoProviderConfig struct {
 	Target      string
+	TargetOS    string // GOOS of the target host: "linux" or "darwin".
+	TargetArch  string // GOARCH of the target host: "amd64" or "arm64".
 	LibPath     string
 	UseSudo     bool
 	Sudo        string
@@ -79,6 +82,11 @@ type ZedAmigoProvider struct {
 	// provider is built and ran locally, and "test" when running acceptance
 	// testing.
 	version string
+	// srcDir is the absolute path to the provider's source checkout, injected
+	// at build time (via -ldflags) for dev builds. It is used to cross-compile
+	// and upload a target-arch binary when driving a remote host with a dev
+	// build (see bootstrapDevBinary). Empty for released builds.
+	srcDir string
 }
 
 // ZedAmigoProviderModel describes the provider data model.
@@ -103,7 +111,10 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 				Target host on which the zedamigo provider will execute commands and
 				create resources. Defaults to |localhost| (run everything locally). Set
 				it to a hostname or IP address to operate on a remote host over SSH; in
-				that case configure the connection in the |ssh| block. Optional.`),
+				that case configure the connection in the |ssh| block. A remote target
+				must be a **Linux** host (the QEMU backend is used); the provider can run
+				on any supported host (e.g. macOS) and does not need qemu/vfkit installed
+				locally for a remote Linux target. macOS targets are local-only. Optional.`),
 				Optional: true,
 			},
 			"lib_path": schema.StringAttribute{
@@ -214,6 +225,10 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	// on, filesystem and command operations go through zaConf.Exec.
 	if zaConf.Target == DefaultZedAmigoTarget {
 		zaConf.Exec = exec.NewLocal(zaConf.UseSudo)
+		// A local target runs on the provider host, so its OS/arch is this
+		// process's OS/arch.
+		zaConf.TargetOS = runtime.GOOS
+		zaConf.TargetArch = runtime.GOARCH
 	} else {
 		sshExec, err := buildSSHExecutor(zaConf.Target, conf.SSH, zaConf.UseSudo)
 		if err != nil {
@@ -221,6 +236,16 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 			return
 		}
 		zaConf.Exec = sshExec
+
+		// Detect the target host's OS/arch over SSH; hypervisor selection and
+		// several resources branch on it.
+		tos, tarch, err := resolveTargetPlatform(ctx, sshExec)
+		if err != nil {
+			resp.Diagnostics.AddError("Can't detect the target host platform", err.Error())
+			return
+		}
+		zaConf.TargetOS = tos
+		zaConf.TargetArch = tarch
 
 		// When lib_path was not set explicitly, resolve the default from the
 		// remote host's environment rather than the local one.
@@ -237,14 +262,20 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 		// Resolve the provider binary path on the target (used by the
 		// self-invoked daemons). Prefer an explicit remote_binary_path; otherwise
-		// bootstrap it via the install script pinned to this provider's version.
+		// provision it: for released versions via the install script pinned to
+		// this provider's version, for dev/test builds by cross-compiling a
+		// target-arch binary locally and uploading it.
 		var rbp types.String
 		if conf.SSH != nil {
 			rbp = conf.SSH.RemoteBinaryPath
 		}
 		selfPath := sshStr(rbp, "ZEDAMIGO_REMOTE_BINARY_PATH")
 		if selfPath == "" {
-			selfPath, err = bootstrapRemoteBinary(ctx, sshExec, zaConf.LibPath, p.version)
+			if isDevVersion(p.version) {
+				selfPath, err = bootstrapDevBinary(ctx, sshExec, zaConf.LibPath, p.srcDir, tos, tarch)
+			} else {
+				selfPath, err = bootstrapRemoteBinary(ctx, sshExec, zaConf.LibPath, p.version)
+			}
 			if err != nil {
 				resp.Diagnostics.AddError("Can't provision the provider binary on the target", err.Error())
 				return
@@ -352,10 +383,11 @@ func newResourceID() (string, error) {
 	return fmt.Sprintf("%08x", b), nil
 }
 
-func New(version string) func() provider.Provider {
+func New(version, srcDir string) func() provider.Provider {
 	return func() provider.Provider {
 		return &ZedAmigoProvider{
 			version: version,
+			srcDir:  srcDir,
 		}
 	}
 }

@@ -12,7 +12,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 )
 
-func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
+// configureVFKit looks up the vfkit toolchain and constructs the VFKitHypervisor
+// for a local macOS (arm64) target. It is only reachable when the provider runs
+// natively on macOS against target = "localhost".
+func configureVFKit(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
 	// Look up vfkit.
 	vfkit, err := zaConf.Exec.LookPath(ctx, "vfkit")
 	if err != nil {

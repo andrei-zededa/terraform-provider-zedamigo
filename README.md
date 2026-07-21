@@ -251,6 +251,12 @@ Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-ins
   `dhcp6_server`, `radv`) and the monitoring daemons (`internet_monitor`,
   `monitor_system_usage`) are **not supported** on macOS.
 - Nested virtualization (EVE-OS running VMs inside the VM) requires **Apple M3 or later**.
+
+> TIP: To keep your config and tooling on macOS but avoid these limitations,
+> point the provider at a **remote Linux host** (see
+> [Running the VMs on a remote host](#running-the-vms-on-a-remote-host)). The VMs
+> then run under Linux/QEMU with the full feature set, while Terraform/OpenTofu
+> and the provider still run on your Mac.
 - **Edge node onboarding must use the soft serial on macOS.** On Linux (QEMU), the
   VM serial number can be set via SMBIOS (`-smbios type=1,serial=...`) and EVE-OS
   reads it through `dmidecode` as the hardware serial number. This allows setting
@@ -264,6 +270,37 @@ Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-ins
   use that value as the `serialno` of the `zedcloud_edgenode` resource. See
   [examples/other/2_edge_nodes/edge_nodes.tf](examples/other/2_edge_nodes/edge_nodes.tf)
   for a working example of this pattern.
+
+## Running the VMs on a remote host
+
+By default the provider creates resources on the machine that runs it
+(`localhost`). Set `target` to a hostname/IP and configure an `ssh {}` block to
+run everything on a **remote host** instead. This is ideal for a macOS
+workstation driving VMs on a native Linux box (e.g. an Intel NUC): you keep your
+config, state and tooling (including this repo) on your Mac, and the VMs run
+under Linux/QEMU with the full feature set. Nothing (`qemu`/`vfkit`) needs to be
+installed locally for a remote Linux target — the tools are looked up and run on
+the target, and the backend is selected from the target's OS (a remote target
+must be Linux; macOS targets are local-only).
+
+```hcl
+provider "zedamigo" {
+  target = "nuc.lan"
+  ssh {
+    user             = "andrei"
+    private_key_file = "~/.ssh/id_ed25519"
+    # proxy_jump      = "root@bastion:22"   # optional bastion/ProxyJump
+  }
+}
+```
+
+The self-invoked helper daemons need a Linux provider binary on the target: for
+released versions it is auto-bootstrapped via the install script; for a local
+dev build (`make dev-install`) the provider cross-compiles a `linux/amd64` binary
+on your workstation and uploads it automatically; or set `ssh.remote_binary_path`
+to a binary you place on the target yourself. See
+[examples/other/remote_linux_target/](examples/other/remote_linux_target/) for a
+full working example.
 
 ## Serial console
 

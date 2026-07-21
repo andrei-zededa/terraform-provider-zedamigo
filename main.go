@@ -32,6 +32,10 @@ var (
 	buildDate = ""
 	builtBy   = ""
 	treeState = ""
+	// srcDir is the absolute path to the source checkout, injected at build
+	// time for dev builds (see the `dev-install` Makefile target). It lets a
+	// dev build cross-compile a target-arch binary when driving a remote host.
+	srcDir = ""
 )
 
 var (
@@ -69,7 +73,7 @@ var (
 	httpUsername  = flag.String("hs.username", "", "HTTP server: username for HTTP basic auth (empty disables auth)")
 	httpPassword  = flag.String("hs.password", "", "HTTP server: password for HTTP basic auth")
 
-	gvproxyMode       = flag.Bool("gvproxy", false, "Run the binary in 'gvproxy' mode (embedded user-space networking)")
+	gvproxyMode        = flag.Bool("gvproxy", false, "Run the binary in 'gvproxy' mode (embedded user-space networking)")
 	gvproxyListenVfkit = flag.String("gp.listen-vfkit", "", "gvproxy: vfkit unixgram socket URI (e.g. unixgram:///path/to/sock)")
 	gvproxyListenQemu  = flag.String("gp.listen-qemu", "", "gvproxy: QEMU unix socket URI (e.g. unix:///path/to/sock)")
 	gvproxyForwards    = flag.String("gp.forwards", "", "gvproxy: comma-separated forwards (hostAddr:port/guestAddr:port,...)")
@@ -244,7 +248,7 @@ func main() {
 		Debug:   *debug,
 	}
 
-	err := providerserver.Serve(context.Background(), provider.New(version), opts)
+	err := providerserver.Serve(context.Background(), provider.New(version, srcDir), opts)
 	if err != nil {
 		log.Fatal(err.Error())
 	}

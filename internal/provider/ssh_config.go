@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	osexec "os/exec"
 	osuser "os/user"
 	"path"
 	"path/filepath"
@@ -356,6 +357,90 @@ func resolveRemoteLibPath(ctx context.Context, ex exec.Executor) (string, error)
 		return "", fmt.Errorf("remote state dir resolved empty")
 	}
 	return path.Join(base, DefaultZedAmigoLibPath), nil
+}
+
+// resolveTargetPlatform detects the OS and architecture of the target host by
+// running `uname` over the executor, returning Go-style GOOS/GOARCH strings
+// (e.g. "linux"/"amd64"). It uses the same mapping as install.sh.
+func resolveTargetPlatform(ctx context.Context, ex exec.Executor) (goos, goarch string, err error) {
+	logDir := "/tmp"
+
+	res, err := ex.Run(ctx, logDir, "uname", "-s")
+	if err != nil {
+		return "", "", fmt.Errorf("can't detect target OS (uname -s): %w", err)
+	}
+	switch kernel := strings.TrimSpace(res.Stdout); kernel {
+	case "Linux":
+		goos = "linux"
+	case "Darwin":
+		goos = "darwin"
+	default:
+		return "", "", fmt.Errorf("unsupported target OS %q (only Linux and macOS are supported)", kernel)
+	}
+
+	res, err = ex.Run(ctx, logDir, "uname", "-m")
+	if err != nil {
+		return "", "", fmt.Errorf("can't detect target architecture (uname -m): %w", err)
+	}
+	switch machine := strings.TrimSpace(res.Stdout); machine {
+	case "x86_64":
+		goarch = "amd64"
+	case "aarch64", "arm64":
+		goarch = "arm64"
+	default:
+		return "", "", fmt.Errorf("unsupported target architecture %q (only x86_64 and arm64 are supported)", machine)
+	}
+
+	return goos, goarch, nil
+}
+
+// isDevVersion reports whether the provider version is a local dev/test build
+// (i.e. not a real release) and therefore cannot be provisioned onto a remote
+// host via the release install script.
+func isDevVersion(version string) bool {
+	return version == "" || version == "dev" || version == "test"
+}
+
+// bootstrapDevBinary provisions the provider binary onto the remote host for a
+// dev/test build: it cross-compiles a target-arch binary locally (on the
+// provider host) from the source checkout and uploads it via SFTP. It returns
+// the path of the uploaded binary on the target. This is the dev counterpart of
+// bootstrapRemoteBinary, which relies on published releases.
+func bootstrapDevBinary(ctx context.Context, ex exec.Executor, libPath, srcDir, goos, goarch string) (string, error) {
+	if srcDir == "" {
+		return "", fmt.Errorf("this is a dev build without an embedded source directory, so it can't be cross-compiled for the remote target; " +
+			"rebuild and install it with `make dev-install`, or set ssh.remote_binary_path to a pre-installed binary on the target")
+	}
+
+	goBin, err := osexec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("can't find the `go` toolchain locally, needed to cross-compile the provider for the remote target: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "zedamigo-xbuild-")
+	if err != nil {
+		return "", fmt.Errorf("can't create temp build dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	outPath := filepath.Join(tmpDir, "terraform-provider-zedamigo")
+
+	// Same build flags as .goreleaser.yml (CGO off, osusergo/netgo) so the
+	// cross-compile is pure Go and works from any host toward linux/amd64.
+	cmd := osexec.CommandContext(ctx, goBin, "build", "-trimpath", "-tags", "osusergo netgo", "-o", outPath, ".")
+	cmd.Dir = srcDir
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("cross-compiling the provider for %s/%s failed: %w; output: %s", goos, goarch, err, strings.TrimSpace(string(out)))
+	}
+
+	remoteBin := path.Join(libPath, "bin", "terraform-provider-zedamigo")
+	if err := ex.MkdirAll(ctx, path.Dir(remoteBin), 0o755); err != nil {
+		return "", fmt.Errorf("can't create remote bin dir: %w", err)
+	}
+	if _, err := ex.Upload(ctx, outPath, remoteBin, 0o755); err != nil {
+		return "", fmt.Errorf("can't upload the cross-compiled provider binary to the target: %w", err)
+	}
+	return remoteBin, nil
 }
 
 // bootstrapRemoteBinary ensures the provider binary is present on the remote
