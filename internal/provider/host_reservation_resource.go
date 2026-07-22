@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -83,12 +85,16 @@ func (r *HostReservation) Schema(ctx context.Context, req resource.SchemaRequest
 			"oversubscribe the host or use the same block device concurrently.\n\n" +
 			"Capacity must be **declared by the operator** by pre-creating empty slot files on the target " +
 			"under the reservations `path`; this resource only claims among existing files and never creates " +
-			"capacity itself. A slot file that is empty is free; one that contains a reservation id is taken.\n\n" +
+			"capacity itself. A slot file that is empty is free; one that holds a reservation marker (a " +
+			"tab-separated line whose first field is the reservation id) is taken.\n\n" +
 			"```\n" +
 			"<path>/cpus/unit/<coreID>   one empty file per reservable CPU (filename is the core ID)\n" +
 			"<path>/ram/gb/<index>       one empty file per reservable GB\n" +
 			"<path>/devs/<abs-dev-path>  e.g. /dev/sdb -> <path>/devs/dev/sdb\n" +
 			"```\n\n" +
+			"A taken slot holds a tab-separated marker recording who claimed it — the reservation id " +
+			"(field 1), the local and remote username, the local and remote hostname, and the source " +
+			"directory of the Terraform configuration — so an operator can tell which user holds a slot.\n\n" +
 			"Requesting more CPUs/GB than are free, or a device with no capacity file, is an error. " +
 			"Reservations are durable: they persist on the target (and across reboots) until the resource " +
 			"is destroyed. Claims are made atomic with `flock`, so this resource requires a Linux target " +
@@ -204,6 +210,37 @@ func (r *HostReservation) reservedRoot(data *HostReservationModel) string {
 	return defaultReservationsPath
 }
 
+// localReservationFields gathers the controller-side ("local") identity stored
+// in a reservation marker: the local username, the local hostname and the source
+// directory of the Terraform configuration driving the apply (the same value
+// createTFBackPointer records). The script resolves the target-side ("remote")
+// username/hostname itself; for a localhost target the two sides coincide, while
+// for a remote target these identify who made the claim, and from where. Every
+// field is sanitized so none can break the tab-separated single-line marker.
+func localReservationFields() (localUser, localHost, configDir string) {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		localUser = u.Username
+	} else if v := os.Getenv("USER"); v != "" {
+		localUser = v
+	} else {
+		localUser = os.Getenv("LOGNAME")
+	}
+	if h, err := os.Hostname(); err == nil {
+		localHost = h
+	}
+	if wd, err := os.Getwd(); err == nil {
+		configDir = wd
+	}
+	return sanitizeReservationField(localUser), sanitizeReservationField(localHost), sanitizeReservationField(configDir)
+}
+
+// sanitizeReservationField squashes tabs/newlines to spaces so a value can be
+// stored as one field of the tab-separated, single-line reservation marker
+// without making the id (field 1) ambiguous. It mirrors the shell `sanitize`.
+func sanitizeReservationField(s string) string {
+	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+}
+
 // runScript invokes the embedded host_reservation.bash on the target as a single
 // argv (so the whole critical section runs under one flock in one call).
 func (r *HostReservation) runScript(ctx context.Context, logDir string, args ...string) (result.Result, error) {
@@ -287,7 +324,12 @@ func (r *HostReservation) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	args := []string{"reserve", r.providerConf.Flock, id, root, strconv.FormatInt(ncpu, 10), strconv.FormatInt(nmem, 10)}
+	localUser, localHost, configDir := localReservationFields()
+	args := []string{
+		"reserve", r.providerConf.Flock, id, root,
+		strconv.FormatInt(ncpu, 10), strconv.FormatInt(nmem, 10),
+		localUser, localHost, configDir,
+	}
 	args = append(args, devs...)
 	res, err := r.runScript(ctx, d, args...)
 	if err != nil {

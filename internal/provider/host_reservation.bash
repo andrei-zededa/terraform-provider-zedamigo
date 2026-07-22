@@ -4,8 +4,15 @@
 #
 # Capacity is declared by the operator pre-creating EMPTY slot files under the
 # reservations root (<root>); this script only claims among existing files and
-# never invents capacity. A slot file that is empty (`! -s`) is FREE; one whose
-# content equals a reservation id is RESERVED by that reservation.
+# never invents capacity. A slot file that is empty (`! -s`) is FREE; a non-empty
+# one is RESERVED and holds a single-line, tab-separated marker whose FIRST field
+# is the owning reservation id (the remaining fields are informational — who made
+# the claim and from where):
+#
+#   <id>\t<local-user>\t<remote-user>\t<local-host>\t<remote-host>\t<config-dir>
+#
+# Ownership is always decided on field 1 alone (see marker_id); a legacy marker
+# that is just a bare "<id>" (no tabs) therefore still matches.
 #
 #   <root>/cpus/unit/<coreID>   one file per reservable CPU (filename = core ID)
 #   <root>/ram/gb/<index>       one file per reservable GB
@@ -19,9 +26,12 @@
 #   bash -c "$SCRIPT" za-host-reservation <mode> <flockbin> <id> <root> [extra...]
 #
 # Modes:
-#   reserve <flockbin> <id> <root> <ncpu> <nmem> [dev...]
+#   reserve <flockbin> <id> <root> <ncpu> <nmem> <luser> <lhost> <cfgdir> [dev...]
 #   release <flockbin> <id> <root>
 #   scan    <flockbin> <id> <root>
+#
+# The <luser>/<lhost>/<cfgdir> trio is the controller-side identity recorded in
+# the marker; the remote (target-side) identity is resolved here at reserve time.
 #
 # All dynamic values arrive as positional parameters ("$@") and are NEVER
 # interpolated into code — only referenced as quoted parameter expansions. This
@@ -79,6 +89,27 @@ acquire_lock() {
 	return 0
 }
 
+# marker_id <file>: print the owning reservation id stored in a marker file —
+# its first tab-separated field — or nothing when the file is empty/unreadable.
+# A legacy bare-"<id>" marker (no tab) yields the whole content unchanged. The
+# marker is written without a trailing newline, so read may report EOF (non-zero)
+# after populating $line; that is expected and ignored.
+marker_id() {
+	local line=''
+	IFS= read -r line <"$1" 2>/dev/null || :
+	printf '%s' "${line%%$'\t'*}"
+}
+
+# sanitize <s>: squash tabs/newlines to spaces so a value stays a single, clean
+# field of the tab-separated one-line marker (keeps field 1 an unambiguous id).
+sanitize() {
+	local s="$1"
+	s="${s//$'\t'/ }"
+	s="${s//$'\n'/ }"
+	s="${s//$'\r'/ }"
+	printf '%s' "$s"
+}
+
 # json_str <s>: emit s as a JSON string literal (escape backslash and quote).
 json_str() {
 	local s="$1"
@@ -98,7 +129,7 @@ emit_owned() {
 			[ -f "$f" ] || continue
 			b="${f##*/}"
 			case "$b" in '' | *[!0-9]*) continue ;; esac
-			[ "$(cat "$f" 2>/dev/null)" = "$id" ] && c+=("$b")
+			[ "$(marker_id "$f")" = "$id" ] && c+=("$b")
 		done
 	fi
 	if [ -d "$root/ram/gb" ]; then
@@ -106,13 +137,13 @@ emit_owned() {
 			[ -f "$f" ] || continue
 			b="${f##*/}"
 			case "$b" in '' | *[!0-9]*) continue ;; esac
-			[ "$(cat "$f" 2>/dev/null)" = "$id" ] && m+=("$b")
+			[ "$(marker_id "$f")" = "$id" ] && m+=("$b")
 		done
 	fi
 	if [ -d "$root/devs" ]; then
 		while IFS= read -r p; do
 			[ -n "$p" ] || continue
-			[ "$(cat "$root/devs/$p" 2>/dev/null)" = "$id" ] && d+=("/$p")
+			[ "$(marker_id "$root/devs/$p")" = "$id" ] && d+=("/$p")
 		done < <(find "$root/devs" -type f -printf '%P\n' 2>/dev/null)
 	fi
 	[ "${#c[@]}" -gt 0 ] && mapfile -t c < <(printf '%s\n' "${c[@]}" | sort -n)
@@ -166,11 +197,23 @@ select_free() {
 }
 
 do_reserve() {
-	local ncpu="${1:-0}" nmem="${2:-0}"
-	shift 2
+	local ncpu="${1:-0}" nmem="${2:-0}" luser="${3:-}" lhost="${4:-}" cfgdir="${5:-}"
+	shift 5
 	case "$ncpu" in '' | *[!0-9]*) fail 1 "internal error: cpu count not numeric: '$ncpu'" ;; esac
 	case "$nmem" in '' | *[!0-9]*) fail 1 "internal error: mem count not numeric: '$nmem'" ;; esac
 	[ -d "$root" ] || fail 2 "reservations path does not exist: $root"
+
+	# Assemble the tab-separated marker written into every claimed slot. The
+	# remote (target-side) identity is resolved here because this script runs on
+	# the target; the local (controller-side) identity and config dir arrive as
+	# args since a remote target cannot know them. For a localhost target the two
+	# sides coincide. Field 1 stays a clean id so marker_id can always recover it.
+	local ruser rhost marker
+	ruser="$(id -un 2>/dev/null || true)"
+	rhost="$(hostname 2>/dev/null || uname -n 2>/dev/null || printf '%s' "${HOSTNAME:-}")"
+	marker="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$id" \
+		"$(sanitize "$luser")" "$(sanitize "$ruser")" \
+		"$(sanitize "$lhost")" "$(sanitize "$rhost")" "$(sanitize "$cfgdir")")"
 
 	acquire_lock 1
 
@@ -184,7 +227,7 @@ do_reserve() {
 		[ -e "$slot" ] || fail 7 "requested device is not reservable (no capacity file): $dev (expected $slot); the operator must pre-create it"
 		[ -f "$slot" ] || fail 7 "requested device capacity path is not a regular file: $slot"
 		if [ -s "$slot" ]; then
-			owner="$(cat "$slot" 2>/dev/null)"
+			owner="$(marker_id "$slot")"
 			fail 8 "requested device already reserved by reservation '$owner': $dev"
 		fi
 		claim+=("$slot")
@@ -195,7 +238,7 @@ do_reserve() {
 	local target i j
 	for ((i = 0; i < ${#claim[@]}; i++)); do
 		target="${claim[i]}"
-		if ! printf '%s' "$id" >"$target" 2>/dev/null; then
+		if ! printf '%s' "$marker" >"$target" 2>/dev/null; then
 			for ((j = 0; j < ${#done_files[@]}; j++)); do
 				: >"${done_files[j]}" 2>/dev/null || true
 			done
@@ -213,7 +256,9 @@ do_release() {
 	local f
 	while IFS= read -r f; do
 		[ -n "$f" ] || continue
-		if [ "$(cat "$f" 2>/dev/null)" = "$id" ]; then
+		# grep is a cheap prefilter (the id may also appear inside another
+		# reservation's config-dir field); marker_id confirms field-1 ownership.
+		if [ "$(marker_id "$f")" = "$id" ]; then
 			: >"$f" 2>/dev/null || true
 		fi
 	done < <(grep -rlF -- "$id" "$root/cpus" "$root/ram" "$root/devs" 2>/dev/null || true)

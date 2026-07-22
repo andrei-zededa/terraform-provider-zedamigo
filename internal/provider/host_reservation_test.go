@@ -9,12 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/matryer/is"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+)
+
+// Fixed controller-side identity fields the harness passes to every reserve, so
+// tests can assert on the stored marker without depending on the host's actual
+// user/hostname (which the script fills into the remote-side fields).
+const (
+	testLocalUser = "tester"
+	testLocalHost = "testhost"
+	testConfigDir = "/tmp/cfg dir" // embedded space: must survive as one field
 )
 
 // scriptHarness drives the embedded host_reservation.bash through a real
@@ -60,7 +70,17 @@ func newScriptHarness(t *testing.T, ncpus, ngb int, devs []string) *scriptHarnes
 
 	run := func(mode, id string, extra ...string) (string, int) {
 		full := []string{"-c", hostReservationScript, hostReservationArg0, mode, flock, id, root}
-		full = append(full, extra...)
+		if mode == "reserve" {
+			// The resource always supplies the controller-side identity trio
+			// (local user, local host, config dir) between "<ncpu> <nmem>" and the
+			// variadic devs. Callers here pass just "<ncpu> <nmem> [dev...]", so
+			// splice fixed test values in to mirror production invocation.
+			full = append(full, extra[:2]...)
+			full = append(full, testLocalUser, testLocalHost, testConfigDir)
+			full = append(full, extra[2:]...)
+		} else {
+			full = append(full, extra...)
+		}
 		res, _ := ex.Run(ctx, logDir, bash, full...)
 		return res.Stdout, res.ExitCode
 	}
@@ -152,6 +172,69 @@ func TestHostReservationScriptLifecycle(t *testing.T) {
 	rr, err = parseReservedJSON(out)
 	is.NoErr(err)
 	is.Equal(rr.CPUs, []int64{0, 1, 2, 3})
+}
+
+// TestHostReservationScriptMarker verifies a claimed slot stores the full
+// tab-separated ownership marker (id + local/remote identity + config dir) and
+// that ownership-keyed operations (scan/release) still key on field 1 alone.
+func TestHostReservationScriptMarker(t *testing.T) {
+	is := is.New(t)
+	h := newScriptHarness(t, 2, 0, nil)
+
+	out, code := h.run("reserve", "abcd1234", "1", "0")
+	is.Equal(code, 0)
+	rr, err := parseReservedJSON(out)
+	is.NoErr(err)
+	is.Equal(len(rr.CPUs), 1)
+
+	slot := filepath.Join(h.root, "cpus", "unit", strconv.FormatInt(rr.CPUs[0], 10))
+	raw, err := os.ReadFile(slot)
+	is.NoErr(err)
+
+	// The record is a single line (no trailing newline) of six tab-separated
+	// fields in the documented order.
+	is.True(!strings.Contains(string(raw), "\n"))
+	fields := strings.Split(string(raw), "\t")
+	is.Equal(len(fields), 6)
+	is.Equal(fields[0], "abcd1234")    // reservation id
+	is.Equal(fields[1], testLocalUser) // local username (supplied by caller)
+	is.True(fields[2] != "")           // remote username (resolved on target)
+	is.Equal(fields[3], testLocalHost) // local hostname (supplied by caller)
+	is.True(fields[4] != "")           // remote hostname (resolved on target)
+	is.Equal(fields[5], testConfigDir) // config dir, embedded space preserved
+
+	// Ownership keys on field 1: scan finds it, release clears it.
+	out, code = h.run("scan", "abcd1234")
+	is.Equal(code, 0)
+	rr, err = parseReservedJSON(out)
+	is.NoErr(err)
+	is.Equal(len(rr.CPUs), 1)
+
+	_, code = h.run("release", "abcd1234")
+	is.Equal(code, 0)
+	is.Equal(fileSize(t, slot), int64(0))
+}
+
+// TestHostReservationScriptLegacyMarker verifies backward compatibility: a slot
+// written by an older provider (bare "<id>", no tabs) is still recognized as
+// owned, so scan/release keep working across the upgrade.
+func TestHostReservationScriptLegacyMarker(t *testing.T) {
+	is := is.New(t)
+	h := newScriptHarness(t, 2, 0, nil)
+
+	// Simulate a legacy claim: the marker is just the id, with no tab fields.
+	legacy := filepath.Join(h.root, "cpus", "unit", "0")
+	is.NoErr(os.WriteFile(legacy, []byte("legacy01"), 0o644))
+
+	out, code := h.run("scan", "legacy01")
+	is.Equal(code, 0)
+	rr, err := parseReservedJSON(out)
+	is.NoErr(err)
+	is.Equal(rr.CPUs, []int64{0})
+
+	_, code = h.run("release", "legacy01")
+	is.Equal(code, 0)
+	is.Equal(fileSize(t, legacy), int64(0))
 }
 
 // TestHostReservationScriptRollback verifies the all-or-nothing property: a
