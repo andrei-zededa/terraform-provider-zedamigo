@@ -213,6 +213,23 @@ func (r *HostReservation) runScript(ctx context.Context, logDir string, args ...
 	return r.providerConf.Exec.Run(ctx, logDir, r.providerConf.Bash, full...)
 }
 
+// scriptErrDetail builds a concise diagnostic detail for a failed
+// host_reservation.bash run. The script prints an actionable message to stderr
+// on every failure path, so that is preferred; the exec error (or bare exit
+// code) is only a fallback for the rare case where stderr is empty (e.g. a
+// transport error before the script produced output). It deliberately omits
+// res.Diagnostics(), whose argv dump carries the entire embedded script and is
+// pure noise for this resource.
+func scriptErrDetail(res result.Result, err error) string {
+	if msg := strings.TrimSpace(res.Stderr); msg != "" {
+		return msg
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("exit code %d", res.ExitCode)
+}
+
 func (r *HostReservation) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data HostReservationModel
 
@@ -278,8 +295,7 @@ func (r *HostReservation) Create(ctx context.Context, req resource.CreateRequest
 		// failure, so no host markers remain. Drop the orphan bookkeeping dir
 		// and surface the actionable message (script stderr).
 		_ = r.providerConf.Exec.Remove(ctx, d)
-		resp.Diagnostics.AddError("Host Reservation claim failed", strings.TrimSpace(res.Stderr))
-		resp.Diagnostics.Append(res.Diagnostics()...)
+		resp.Diagnostics.AddError("Host Reservation claim failed", scriptErrDetail(res, err))
 		return
 	}
 
@@ -319,8 +335,7 @@ func (r *HostReservation) Read(ctx context.Context, req resource.ReadRequest, re
 
 	res, err := r.runScript(ctx, d, "scan", "", id, root)
 	if err != nil {
-		resp.Diagnostics.AddError("Host Reservation scan failed", strings.TrimSpace(res.Stderr))
-		resp.Diagnostics.Append(res.Diagnostics()...)
+		resp.Diagnostics.AddError("Host Reservation scan failed", scriptErrDetail(res, err))
 		return
 	}
 	rr, err := parseReservedJSON(res.Stdout)
@@ -370,7 +385,7 @@ func (r *HostReservation) Delete(ctx context.Context, req resource.DeleteRequest
 	res, err := r.runScript(ctx, d, "release", r.providerConf.Flock, id, root)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Host Reservation release reported an error",
-			strings.TrimSpace(res.Stderr))
+			scriptErrDetail(res, err))
 	}
 
 	if err := r.providerConf.Exec.Remove(ctx, d); err != nil {
