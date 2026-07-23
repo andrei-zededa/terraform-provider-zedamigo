@@ -4,12 +4,13 @@ page_title: "zedamigo_host_reservation Resource - zedamigo"
 subcategory: ""
 description: |-
   Reserve a slice of finite host capacity (CPUs, GB of memory, /dev devices) so that multiple VMs/edge-nodes — even across independent Terraform configurations — do not oversubscribe the host or use the same block device concurrently.
-  Capacity must be declared by the operator by pre-creating empty slot files on the target under the reservations path; this resource only claims among existing files and never creates capacity itself. A slot file that is empty is free; one that contains a reservation id is taken.
+  Capacity must be declared by the operator by pre-creating empty slot files on the target under the reservations path; this resource only claims among existing files and never creates capacity itself. A slot file that is empty is free; one that holds a reservation marker (a tab-separated line whose first field is the reservation id) is taken.
   
   <path>/cpus/unit/<coreID>   one empty file per reservable CPU (filename is the core ID)
   <path>/ram/gb/<index>       one empty file per reservable GB
   <path>/devs/<abs-dev-path>  e.g. /dev/sdb -> <path>/devs/dev/sdb
   
+  A taken slot holds a tab-separated marker recording who claimed it — the reservation id (field 1), the local and remote username, the local and remote hostname, and the source directory of the Terraform configuration — so an operator can tell which user holds a slot.
   Requesting more CPUs/GB than are free, or a device with no capacity file, is an error. Reservations are durable: they persist on the target (and across reboots) until the resource is destroyed. Claims are made atomic with flock, so this resource requires a Linux target with util-linux flock installed. The path directory must be writable by the provider's execution identity (use a host-wide path with use_sudo/root, or override path).
 ---
 
@@ -17,13 +18,15 @@ description: |-
 
 Reserve a slice of finite host capacity (CPUs, GB of memory, `/dev` devices) so that multiple VMs/edge-nodes — even across independent Terraform configurations — do not oversubscribe the host or use the same block device concurrently.
 
-Capacity must be **declared by the operator** by pre-creating empty slot files on the target under the reservations `path`; this resource only claims among existing files and never creates capacity itself. A slot file that is empty is free; one that contains a reservation id is taken.
+Capacity must be **declared by the operator** by pre-creating empty slot files on the target under the reservations `path`; this resource only claims among existing files and never creates capacity itself. A slot file that is empty is free; one that holds a reservation marker (a tab-separated line whose first field is the reservation id) is taken.
 
 ```
 <path>/cpus/unit/<coreID>   one empty file per reservable CPU (filename is the core ID)
 <path>/ram/gb/<index>       one empty file per reservable GB
 <path>/devs/<abs-dev-path>  e.g. /dev/sdb -> <path>/devs/dev/sdb
 ```
+
+A taken slot holds a tab-separated marker recording who claimed it — the reservation id (field 1), the local and remote username, the local and remote hostname, and the source directory of the Terraform configuration — so an operator can tell which user holds a slot.
 
 Requesting more CPUs/GB than are free, or a device with no capacity file, is an error. Reservations are durable: they persist on the target (and across reboots) until the resource is destroyed. Claims are made atomic with `flock`, so this resource requires a Linux target with util-linux `flock` installed. The `path` directory must be writable by the provider's execution identity (use a host-wide path with `use_sudo`/root, or override `path`).
 
@@ -72,6 +75,8 @@ output "reserved_cpu_cores" {
 ### Read-Only
 
 - `cpus_reserved` (List of Number) The CPU core IDs that were actually reserved, e.g. `[1, 2, 6, 7]`. Useful as input to an edge node's `cpu_pins`.
+- `cpus_reserved_count` (Number) Number of CPUs that were actually reserved (the length of `cpus_reserved`).
 - `devs_reserved` (List of String) The device paths that were actually reserved (equal to `devs` on success).
 - `id` (String) Reservation identifier.
 - `mem_reserved` (List of Number) The GB slot indices that were actually reserved.
+- `mem_reserved_total_gb` (Number) Total memory actually reserved, in GB. Each `mem_reserved` slot is 1 GB, so this equals the length of `mem_reserved`.

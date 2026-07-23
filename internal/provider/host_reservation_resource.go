@@ -67,6 +67,9 @@ type HostReservationModel struct {
 	CPUsReserved types.List   `tfsdk:"cpus_reserved"`
 	MemReserved  types.List   `tfsdk:"mem_reserved"`
 	DevsReserved types.List   `tfsdk:"devs_reserved"`
+
+	CPUsReservedCount  types.Int64 `tfsdk:"cpus_reserved_count"`
+	MemReservedTotalGB types.Int64 `tfsdk:"mem_reserved_total_gb"`
 }
 
 func (r *HostReservation) getResourceDir(id string) string {
@@ -176,6 +179,22 @@ func (r *HostReservation) Schema(ctx context.Context, req resource.SchemaRequest
 				MarkdownDescription: "The device paths that were actually reserved (equal to `devs` on success).",
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"cpus_reserved_count": schema.Int64Attribute{
+				Computed:            true,
+				Description:         "Number of CPUs that were actually reserved (length of cpus_reserved).",
+				MarkdownDescription: "Number of CPUs that were actually reserved (the length of `cpus_reserved`).",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			"mem_reserved_total_gb": schema.Int64Attribute{
+				Computed:            true,
+				Description:         "Total memory actually reserved, in GB (length of mem_reserved).",
+				MarkdownDescription: "Total memory actually reserved, in GB. Each `mem_reserved` slot is 1 GB, so this equals the length of `mem_reserved`.",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 		},
@@ -482,6 +501,8 @@ func applyReserved(data *HostReservationModel, rr reservedResult) diag.Diagnosti
 	data.CPUsReserved = cpus
 	data.MemReserved = mem
 	data.DevsReserved = devs
+	data.CPUsReservedCount = types.Int64Value(int64(len(rr.CPUs)))
+	data.MemReservedTotalGB = types.Int64Value(int64(len(rr.Mem)))
 	return diags
 }
 
