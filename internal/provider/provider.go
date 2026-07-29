@@ -334,6 +334,7 @@ func (p *ZedAmigoProvider) Resources(ctx context.Context) []func() resource.Reso
 		NewInternetMonitor,
 		NewMonitorSystemUsage,
 		NewHostReservation,
+		NewWaitUntil,
 	}
 }
 

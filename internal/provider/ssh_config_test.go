@@ -24,6 +24,7 @@ func clearSSHEnv(t *testing.T) {
 		"ZEDAMIGO_SSH_PRIVATE_KEY_FILE", "ZEDAMIGO_SSH_PRIVATE_KEY_PASSPHRASE",
 		"ZEDAMIGO_SSH_USE_AGENT", "ZEDAMIGO_SSH_KNOWN_HOSTS", "ZEDAMIGO_SSH_HOST_KEY",
 		"ZEDAMIGO_SSH_INSECURE", "ZEDAMIGO_SSH_PROXY_JUMP",
+		"ZEDAMIGO_SSH_FORWARD_AGENT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -233,4 +234,69 @@ func TestParseJumpSpec(t *testing.T) {
 				c.in, user, host, port, c.user, c.host, c.port)
 		}
 	}
+}
+
+func TestForwardAgentSocket(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		clearSSHEnv(t)
+		t.Setenv("SSH_AUTH_SOCK", "/tmp/some-agent.sock")
+
+		sock, err := forwardAgentSocket(&SSHModel{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sock != "" {
+			t.Fatalf("agent forwarding must be off unless asked for, got %q", sock)
+		}
+	})
+
+	t.Run("returns SSH_AUTH_SOCK when enabled", func(t *testing.T) {
+		clearSSHEnv(t)
+		t.Setenv("SSH_AUTH_SOCK", "/tmp/some-agent.sock")
+
+		sock, err := forwardAgentSocket(&SSHModel{ForwardAgent: types.BoolValue(true)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sock != "/tmp/some-agent.sock" {
+			t.Fatalf("socket = %q, want /tmp/some-agent.sock", sock)
+		}
+	})
+
+	t.Run("fails closed with no agent running", func(t *testing.T) {
+		clearSSHEnv(t)
+		t.Setenv("SSH_AUTH_SOCK", "")
+
+		if _, err := forwardAgentSocket(&SSHModel{ForwardAgent: types.BoolValue(true)}); err == nil {
+			t.Fatal("expected an error when forward_agent is set but no agent is running")
+		}
+	})
+
+	t.Run("env fallback enables it", func(t *testing.T) {
+		clearSSHEnv(t)
+		t.Setenv("SSH_AUTH_SOCK", "/tmp/some-agent.sock")
+		t.Setenv("ZEDAMIGO_SSH_FORWARD_AGENT", "true")
+
+		sock, err := forwardAgentSocket(&SSHModel{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sock != "/tmp/some-agent.sock" {
+			t.Fatalf("socket = %q, want the env fallback to enable forwarding", sock)
+		}
+	})
+
+	t.Run("explicit false wins over the env fallback", func(t *testing.T) {
+		clearSSHEnv(t)
+		t.Setenv("SSH_AUTH_SOCK", "/tmp/some-agent.sock")
+		t.Setenv("ZEDAMIGO_SSH_FORWARD_AGENT", "true")
+
+		sock, err := forwardAgentSocket(&SSHModel{ForwardAgent: types.BoolValue(false)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sock != "" {
+			t.Fatalf("an explicit forward_agent = false must win, got %q", sock)
+		}
+	})
 }

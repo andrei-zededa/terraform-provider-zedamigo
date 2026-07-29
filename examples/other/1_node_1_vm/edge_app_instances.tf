@@ -21,6 +21,46 @@ resource "zedcloud_network_instance" "NET_INSTANCES_APP_NAT" {
   port           = "uplink"
   device_default = true
 
+  # Pin an explicit subnet/gateway instead of letting EVE-OS auto-assign one.
+  # We need a stable, known gateway IP (the network-instance bridge IP) so that
+  # the static route below can point at it (see the static_routes comment). The
+  # bridge itself acts as the gateway, DNS server and DHCP server for the app.
+  ip {
+    subnet  = "10.166.0.0/16"
+    gateway = "10.166.0.1"
+    dns     = ["10.166.0.1"]
+    dhcp_range {
+      start = "10.166.0.128"
+      end   = "10.166.255.254"
+    }
+  }
+
+  # Advertise an explicit host route for the EVE-OS metadata server
+  # (169.254.169.254) to the app through this local network-instance.
+  #
+  # The app is attached to several network-instances at once: this local NAT one
+  # plus the switch network-instances on eth1/eth2. Each of them advertises its
+  # own default route to the app, so the app ends up with multiple default
+  # routes. Without a more specific route, the app has no way of knowing that
+  # 169.254.169.254 must be reached specifically via this local network-instance:
+  # it may pick one of the switch network-instances instead, where nothing
+  # answers on 169.254.169.254 (EVE-OS only runs the metadata server on local
+  # network-instances), and the metadata request therefore fails.
+  #
+  # This /32 route is more specific than any default route, so once it is
+  # advertised the app always sends 169.254.169.254 traffic through this local
+  # network-instance where the metadata server is reachable. We set `gateway` to
+  # this network-instance's own gateway (bridge) IP: because the gateway is
+  # inside the network-instance subnet, EVE-OS propagates the route verbatim to
+  # the app via DHCP option 121 (`169.254.169.254/32 via 10.166.0.1`). This is
+  # deterministic and does not depend on the uplink port having a resolvable
+  # gateway, unlike the `output_port` form which is silently dropped when
+  # EVE-OS cannot resolve a connected gateway for the output port.
+  static_routes {
+    prefix  = "169.254.169.254/32"
+    gateway = "10.166.0.1"
+  }
+
   tags = {
     ni_local_nat = "true"
   }
@@ -80,8 +120,33 @@ locals {
   ]
 }
 
+resource "zedcloud_volume_instance" "APP_PERSIST_STORAGE" {
+  for_each = local.nodes
+
+  name  = "app_persist_storage_on_${each.value.name}_${var.config_suffix}"
+  title = "app_persist_storage_on_${each.value.name}_${var.config_suffix}"
+
+  project_id = zedcloud_project.PROJECT.id
+  device_id  = each.value.id
+
+  type       = "VOLUME_INSTANCE_TYPE_BLOCKSTORAGE"
+  accessmode = "VOLUME_INSTANCE_ACCESS_MODE_READWRITE"
+  size_bytes = 21474836480 #### 20GB
+
+  image       = ""
+  multiattach = false
+  cleartext   = true
+
+  # Take the label directly from the edge-app definition.
+  label = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[1].volumelabel
+}
+
 resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
   for_each = local.nodes
+
+  # If we don't explictly set the dependency then the app-instances might be
+  # created before the volume-instances exist on the node(s).
+  depends_on = [zedcloud_volume_instance.APP_PERSIST_STORAGE]
 
   name      = "ubuntu_test_on_${each.value.name}"
   title     = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name} for ${each.value.name}"
@@ -135,17 +200,6 @@ resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
     cpus = 6
     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
     vnc  = true
-  }
-
-  drives {
-    cleartext = true
-    mountpath = "/"
-    imagename = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].imagename
-    maxsize   = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].maxsize
-    preserve  = false
-    readonly  = false
-    drvtype   = ""
-    target    = ""
   }
 
   interfaces {

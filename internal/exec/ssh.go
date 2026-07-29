@@ -16,6 +16,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd/result"
@@ -47,6 +48,13 @@ type SSHParams struct {
 	// means a direct connection to the target.
 	Jumps   []JumpHost
 	UseSudo bool
+	// AgentSocket, when non-empty, is the path of a local SSH agent socket
+	// (normally $SSH_AUTH_SOCK) to forward to the target, so that commands run
+	// there can authenticate onward with the operator's keys without those keys
+	// ever being copied to the target. Empty means no forwarding, which is the
+	// default. Only the target gets the agent: jump hosts merely tunnel the
+	// connection and no session is opened on them.
+	AgentSocket string
 }
 
 // SSHExecutor runs operations on a remote host over SSH. Commands run through
@@ -54,10 +62,11 @@ type SSHParams struct {
 // with kill/readlink over /proc; sockets are reached with SSH streamlocal
 // (unix) or direct-tcpip (tcp) forwarding.
 type SSHExecutor struct {
-	addr    string
-	cfg     *ssh.ClientConfig
-	jumps   []JumpHost
-	useSudo bool
+	addr        string
+	cfg         *ssh.ClientConfig
+	jumps       []JumpHost
+	useSudo     bool
+	agentSocket string
 
 	mu          sync.Mutex
 	client      *ssh.Client
@@ -77,11 +86,12 @@ var _ Executor = (*SSHExecutor)(nil)
 // SetSelfPath after it has been bootstrapped on the target.
 func NewSSH(p SSHParams) *SSHExecutor {
 	return &SSHExecutor{
-		addr:    p.Addr,
-		cfg:     p.ClientConfig,
-		jumps:   p.Jumps,
-		useSudo: p.UseSudo,
-		done:    make(chan struct{}),
+		addr:        p.Addr,
+		cfg:         p.ClientConfig,
+		jumps:       p.Jumps,
+		useSudo:     p.UseSudo,
+		agentSocket: p.AgentSocket,
+		done:        make(chan struct{}),
 	}
 }
 
@@ -106,6 +116,25 @@ func (e *SSHExecutor) conn(_ context.Context) (*ssh.Client, *sftp.Client, error)
 	client, jumpClients, err := e.dial()
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Set up agent forwarding before anything runs. Both halves belong here, at
+	// connection scope: HandleChannelOpen accepts one handler per channel type per
+	// client, and the auth-agent request may be made only ONCE per connection (see
+	// requestAgentForwarding). Doing it now also means a bad SSH_AUTH_SOCK or a
+	// target that forbids forwarding is reported at connect time rather than by
+	// whichever command happened to need a key first.
+	if e.agentSocket != "" {
+		if err := agent.ForwardToRemote(client, e.agentSocket); err != nil {
+			client.Close()
+			closeClients(jumpClients)
+			return nil, nil, fmt.Errorf("can't forward the SSH agent at %s: %w", e.agentSocket, err)
+		}
+		if err := requestAgentForwarding(client); err != nil {
+			client.Close()
+			closeClients(jumpClients)
+			return nil, nil, err
+		}
 	}
 
 	sc, err := sftp.NewClient(client)
@@ -274,6 +303,46 @@ func (e *SSHExecutor) runCaptured(ctx context.Context, cmdStr string) (string, i
 		return stdout.String(), -1, runErr
 	}
 	return stdout.String(), 0, nil
+}
+
+// requestAgentForwarding asks the target to set up agent forwarding for the whole
+// CONNECTION, and must be called exactly once per connection.
+//
+// "Exactly once" is a hard protocol constraint, not an optimization. OpenSSH's
+// sshd answers a second auth-agent-req on the same connection with
+// "authentication forwarding requested twice" and fails the request
+// (session_auth_agent_req has a `static int called` guard, and
+// auth_input_request_forwarding refuses when the socket already exists). Since
+// the executor multiplexes every command as a new session over one long-lived
+// connection, requesting per session would work for the first command and then be
+// denied for every command after it — which is exactly what the resources saw.
+// OpenSSH's own client sends the request once per connection too (and without
+// even asking for a reply).
+//
+// The request goes on a throwaway session channel, which is all sshd needs: a
+// freshly opened session is in the LARVAL state and accepts the request without
+// any exec, and sshd answers it by binding the agent socket as a
+// connection-scoped channel (SSH_CHANNEL_AUTH_SOCKET) rather than one owned by
+// the requesting session. So the socket outlives this session, and every later
+// session on the connection gets SSH_AUTH_SOCK pointing at it via do_setup_env.
+//
+// A refusal is a hard error rather than a warning: the operator explicitly asked
+// for forwarding, and silently continuing without it turns into a puzzling
+// authentication failure (or, for zedamigo_wait_until, a full-timeout wait) far
+// from the actual cause.
+func requestAgentForwarding(client *ssh.Client) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("can't open a session to request SSH agent forwarding: %w", err)
+	}
+	defer sess.Close()
+
+	if err := agent.RequestAgentForwarding(sess); err != nil {
+		return fmt.Errorf("the target refused SSH agent forwarding "+
+			"(check AllowAgentForwarding in its sshd_config): %w", err)
+	}
+
+	return nil
 }
 
 // detachCmd returns the detach helper to use for RunDetached ("setsid" or, if

@@ -35,6 +35,7 @@ type SSHModel struct {
 	PrivateKeyFile        types.String `tfsdk:"private_key_file"`
 	PrivateKeyPassphrase  types.String `tfsdk:"private_key_passphrase"`
 	UseAgent              types.Bool   `tfsdk:"use_agent"`
+	ForwardAgent          types.Bool   `tfsdk:"forward_agent"`
 	KnownHostsFile        types.String `tfsdk:"known_hosts_file"`
 	HostKey               types.String `tfsdk:"host_key"`
 	InsecureIgnoreHostKey types.Bool   `tfsdk:"insecure_ignore_host_key"`
@@ -83,6 +84,38 @@ func sshSchemaBlock() schema.Block {
 				Description: "Use the SSH agent at $SSH_AUTH_SOCK for public-key auth. Env: ZEDAMIGO_SSH_USE_AGENT.",
 				Optional:    true,
 			},
+			"forward_agent": schema.BoolAttribute{
+				Description: "Forward the local SSH agent at $SSH_AUTH_SOCK to the target, so commands run there " +
+					"(e.g. a zedamigo_wait_until script sshing on to an edge node) can authenticate with your keys " +
+					"without copying them to the target. Default false. Env: ZEDAMIGO_SSH_FORWARD_AGENT.",
+				MarkdownDescription: undent.Md(`
+				Forward the local SSH agent at |$SSH_AUTH_SOCK| to the target, the equivalent of OpenSSH's
+				|ForwardAgent yes| / |ssh -A|. Commands the provider runs on the target then get an |SSH_AUTH_SOCK|
+				of their own and can authenticate onward with the operator's keys, without any private key ever
+				being copied to the target. The typical use is a |zedamigo_wait_until| script that sshes from the
+				target on to an edge node.
+
+				Defaults to |false|. Independent of |use_agent|, which controls whether the agent is used to
+				authenticate TO the target: either can be set without the other, though both need a running agent.
+
+				Only the target receives the agent — jump hosts merely tunnel the connection.
+
+				Forwarding is negotiated once, when the provider connects, and then applies to every command it runs
+				(sshd allows the request only once per connection and binds the agent socket to the connection, not to
+				a single session). The target's sshd must permit it — |AllowAgentForwarding yes|, the OpenSSH default,
+				and no |no-agent-forwarding| restriction on the key in |authorized_keys| — or configuring the provider
+				fails with an explicit error.
+
+				Long-lived daemons the provider starts on the target (DHCP/RA servers and the like) do inherit the
+				socket, but it stops working once the provider exits and its SSH connection closes, so do not rely on
+				it there.
+
+				SECURITY: anyone able to read the forwarded socket on the target — root, or the same user — can use
+				your loaded keys for as long as the command runs. Only enable it for targets you trust, and prefer
+				agent keys that are confirmation- or lifetime-constrained (|ssh-add -c|, |ssh-add -t|).
+				Env: |ZEDAMIGO_SSH_FORWARD_AGENT|.`),
+				Optional: true,
+			},
 			"known_hosts_file": schema.StringAttribute{
 				Description: "Path to a known_hosts file for host key verification. Defaults to ~/.ssh/known_hosts if present. Env: ZEDAMIGO_SSH_KNOWN_HOSTS.",
 				Optional:    true,
@@ -125,6 +158,11 @@ func buildSSHExecutor(target string, m *SSHModel, useSudo bool) (*exec.SSHExecut
 		return nil, err
 	}
 
+	agentSocket, err := forwardAgentSocket(m)
+	if err != nil {
+		return nil, err
+	}
+
 	port := sshPort(m.Port, "ZEDAMIGO_SSH_PORT")
 	addr := net.JoinHostPort(target, strconv.FormatInt(port, 10))
 
@@ -133,7 +171,31 @@ func buildSSHExecutor(target string, m *SSHModel, useSudo bool) (*exec.SSHExecut
 		ClientConfig: cfg,
 		Jumps:        jumps,
 		UseSudo:      useSudo,
+		AgentSocket:  agentSocket,
 	}), nil
+}
+
+// forwardAgentSocket resolves the local SSH agent socket to forward to the
+// target, or "" when ssh.forward_agent is off (the default). It fails closed:
+// asking for forwarding with no agent running is a configuration error, and
+// silently proceeding without it would surface much later as an unexplained
+// authentication failure on the target.
+//
+// Note this is deliberately separate from use_agent (authenticating TO the
+// target): the two are independent, and forwarding is useful even when the
+// target is reached with a password or an explicit key file.
+func forwardAgentSocket(m *SSHModel) (string, error) {
+	if !sshBool(m.ForwardAgent, "ZEDAMIGO_SSH_FORWARD_AGENT") {
+		return "", nil
+	}
+
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return "", fmt.Errorf("ssh.forward_agent is set but SSH_AUTH_SOCK is empty: " +
+			"start an agent and load a key (eval \"$(ssh-agent)\" && ssh-add), or unset ssh.forward_agent")
+	}
+
+	return sock, nil
 }
 
 // buildSSHJumpChain parses the ssh.proxy_jump specification into an ordered

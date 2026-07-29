@@ -382,6 +382,8 @@ from the source code in the [docs/](docs/) folder.
 | [radv](docs/resources/radv.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
 | [internet_monitor](docs/resources/internet_monitor.md) | ✅ | ❌ | Linux only; embedded connectivity-probe daemon |
 | [monitor_system_usage](docs/resources/monitor_system_usage.md) | ✅ | ❌ | Linux only; embedded `msu-collect` daemon |
+| [host_reservation](docs/resources/host_reservation.md) | ✅ | ❌ | Linux only; requires util-linux `flock`; cooperative CPU/MEM/device reservations |
+| [wait_until](docs/resources/wait_until.md) | ✅ | ✅ | Barrier: re-runs a script on the target until it exits 0 |
 
 The provider also exposes the following data sources:
 

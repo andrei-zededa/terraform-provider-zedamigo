@@ -55,7 +55,7 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intfname   = "eth1"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
-    cost       = 0
+    cost       = 10
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
     ztype      = "IO_TYPE_ETH"
     tags       = {}
@@ -65,7 +65,7 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intfname   = "eth2"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
-    cost       = 0
+    cost       = 20
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
     ztype      = "IO_TYPE_ETH"
     tags       = {}
@@ -75,7 +75,7 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intfname   = "eth3"
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
-    cost       = 0
+    cost       = 30
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
     ztype      = "IO_TYPE_ETH_PF"
     tags       = {}
@@ -95,7 +95,7 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
   name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.14.0-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "16.0.1-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -109,9 +109,16 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
    EOF
 }
 
+resource "zedamigo_host_reservation" "ENODE_TEST_resources" {
+  cpus = 2
+  mem  = 4 # GB
+}
+
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
 #### created and run the install process.
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
+  depends_on = [zedamigo_host_reservation.ENODE_TEST_resources]
+
   name = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
@@ -149,8 +156,8 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus = 2
-  mem  = "4G"
+  cpus = zedamigo_host_reservation.ENODE_TEST_resources.cpus_reserved_count
+  mem  = "${zedamigo_host_reservation.ENODE_TEST_resources.mem_reserved_total_gb}G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true

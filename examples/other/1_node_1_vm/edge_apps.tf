@@ -113,13 +113,27 @@ resource "zedcloud_application" "UBUNTU_VM_DEF" {
       imageformat = "QCOW2"
       imageid     = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.id : zedcloud_image.ubuntu_24_04_server_cloud_amd64.id
       imagename   = upper(var.EDGE_NODE_ARCH) == "ARM64" ? zedcloud_image.ubuntu_24_04_server_cloud_arm64.name : zedcloud_image.ubuntu_24_04_server_cloud_amd64.name
-      # maxsize is in kilobytes.
-      maxsize     = 5242880 # 5GB
+      # maxsize is in kilobytes, so for example "5242880" = 5GB but it can be left at "0".
+      maxsize     = 0
       mountpath   = "/"
       ignorepurge = false
       preserve    = false
       readonly    = false
       target      = "Disk"
+    }
+
+    images {
+      cleartext   = false
+      ignorepurge = true
+      imageformat = "FmtUnknown"
+      imageid     = ""
+      imagename   = ""
+      maxsize     = "0"
+      # The actual mount path is decided by the VM guest OS config.
+      mountpath   = "/mnt/data"
+      preserve    = true
+      readonly    = false
+      volumelabel = "ubuntu_persistent_data"
     }
 
     interfaces {

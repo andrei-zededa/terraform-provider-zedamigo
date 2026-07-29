@@ -36,6 +36,15 @@ provider "zedamigo" {
   #   # password       = "..."
   #   # use_agent      = true                # use $SSH_AUTH_SOCK
   #
+  #   # Forward the local agent at $SSH_AUTH_SOCK to the target (like `ssh -A`),
+  #   # so commands the provider runs there — e.g. a zedamigo_wait_until script
+  #   # that sshes on to an edge node — can authenticate with your keys without
+  #   # copying any private key to the target. Defaults to false. Independent of
+  #   # use_agent, which is about authenticating TO the target.
+  #   # SECURITY: while a command runs, anyone who can read the forwarded socket
+  #   # on the target can use your loaded keys. Env: ZEDAMIGO_SSH_FORWARD_AGENT.
+  #   # forward_agent = false
+  #
   #   # Host key verification (fails closed): defaults to ~/.ssh/known_hosts.
   #   # known_hosts_file         = "~/.ssh/known_hosts"
   #   # host_key                 = "ssh-ed25519 AAAA..."

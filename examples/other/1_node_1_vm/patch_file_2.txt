@@ -1,0 +1,5 @@
+Hello from patch envelope file #2!
+
+This second example text file demonstrates that a single patch envelope can
+carry multiple inline artifacts. Each artifact is loaded from a separate file
+in the Terraform module and base64-encoded at plan time.

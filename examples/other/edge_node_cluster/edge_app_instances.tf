@@ -93,105 +93,105 @@ locals {
   ]
 }
 
-# resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
-#   depends_on = [time_sleep.WAIT_AFTER_CLUSTER]
-# 
-#   name  = "ubuntu_test_${var.config_suffix}"
-#   title = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name}"
-#   # cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
-#   edge_node_cluster {
-#     id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
-#   }
-#   app_id   = zedcloud_application.UBUNTU_VM_DEF.id
-#   app_type = zedcloud_application.UBUNTU_VM_DEF.manifest[0].app_type
-# 
-#   activate = true
-# 
-#   logs {
-#     access = true
-#   }
-# 
-#   # The `custom_config` section is identical to what is in the edge-app definition,
-#   # only that for generating the list of variables we use the per-instance list
-#   # of variables (`local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS`) instead of the
-#   # list which was used in the edge-app definition (`var.UBUNTU_CLOUD_INIT_VARS`).
-#   custom_config {
-#     add                  = true
-#     allow_storage_resize = false
-#     field_delimiter      = "####"
-#     name                 = "config01"
-#     override             = false
-#     template             = filebase64("${path.module}/ubuntu_cloud_init.txt")
-# 
-#     variable_groups {
-#       name     = "Default Group 1"
-#       required = true
-# 
-#       dynamic "variables" {
-#         for_each = local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS
-#         content {
-#           name       = variables.value.name
-#           default    = variables.value.default
-#           required   = variables.value.required
-#           label      = variables.value.label
-#           format     = variables.value.format
-#           encode     = variables.value.encode
-#           max_length = variables.value.max_length
-#           value      = variables.value.value
-#         }
-#       }
-#     }
-#   }
-# 
-#   manifest_info {
-#     transition_action = "INSTANCE_TA_NONE"
-#   }
-# 
-#   vminfo {
-#     cpus = 6
-#     mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
-#     vnc  = true
-#   }
-# 
-#   drives {
-#     cleartext = true
-#     mountpath = "/"
-#     imagename = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].imagename
-#     maxsize   = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].maxsize
-#     preserve  = false
-#     readonly  = false
-#     drvtype   = ""
-#     target    = ""
-#   }
-# 
-#   interfaces {
-#     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[0].name
-#     intforder   = 1
-#     privateip   = false
-#     netinstname = zedcloud_network_instance.NET_INSTANCES_APP_NAT.name
-#   }
-# 
-#   interfaces {
-#     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[1].name
-#     intforder   = 2
-#     privateip   = false
-#     netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_FIRST.name
-#   }
-# 
-#   interfaces {
-#     intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[2].name
-#     intforder   = 3
-#     privateip   = false
-#     netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_2ND.name
-#   }
-# }
+resource "zedcloud_application_instance" "APP_INSTANCES_VMS" {
+  depends_on = [time_sleep.WAIT_AFTER_CLUSTER]
 
-# output "EDGE_APP_INSTANCES" {
-#   description = "Print edge-app-instances which have been created for every edge-node which joined the project"
-#   sensitive   = true
-#   value = {
-#     id       = zedcloud_application_instance.APP_INSTANCES_VMS.id
-#     name     = zedcloud_application_instance.APP_INSTANCES_VMS.name
-#     password = random_password.vm_password.result
-#   }
-# }
+  name  = "ubuntu_test_${var.config_suffix}"
+  title = "TF created instance of ${zedcloud_application.UBUNTU_VM_DEF.name}"
+  # cluster_id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  edge_node_cluster {
+    id = zedcloud_edgenode_cluster.TEST_CLUSTER.id
+  }
+  app_id   = zedcloud_application.UBUNTU_VM_DEF.id
+  app_type = zedcloud_application.UBUNTU_VM_DEF.manifest[0].app_type
+
+  activate = true
+
+  logs {
+    access = true
+  }
+
+  # The `custom_config` section is identical to what is in the edge-app definition,
+  # only that for generating the list of variables we use the per-instance list
+  # of variables (`local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS`) instead of the
+  # list which was used in the edge-app definition (`var.UBUNTU_CLOUD_INIT_VARS`).
+  custom_config {
+    add                  = true
+    allow_storage_resize = false
+    field_delimiter      = "####"
+    name                 = "config01"
+    override             = false
+    template             = filebase64("${path.module}/ubuntu_cloud_init.txt")
+
+    variable_groups {
+      name     = "Default Group 1"
+      required = true
+
+      dynamic "variables" {
+        for_each = local.APP_INSTANCE_UBUNTU_CLOUD_INIT_VARS
+        content {
+          name       = variables.value.name
+          default    = variables.value.default
+          required   = variables.value.required
+          label      = variables.value.label
+          format     = variables.value.format
+          encode     = variables.value.encode
+          max_length = variables.value.max_length
+          value      = variables.value.value
+        }
+      }
+    }
+  }
+
+  manifest_info {
+    transition_action = "INSTANCE_TA_NONE"
+  }
+
+  vminfo {
+    cpus = 6
+    mode = zedcloud_application.UBUNTU_VM_DEF.manifest[0].vmmode
+    vnc  = true
+  }
+
+  drives {
+    cleartext = true
+    mountpath = "/"
+    imagename = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].imagename
+    maxsize   = zedcloud_application.UBUNTU_VM_DEF.manifest[0].images[0].maxsize
+    preserve  = false
+    readonly  = false
+    drvtype   = ""
+    target    = ""
+  }
+
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[0].name
+    intforder   = 1
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_APP_NAT.name
+  }
+
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[1].name
+    intforder   = 2
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_FIRST.name
+  }
+
+  interfaces {
+    intfname    = zedcloud_application.UBUNTU_VM_DEF.manifest[0].interfaces[2].name
+    intforder   = 3
+    privateip   = false
+    netinstname = zedcloud_network_instance.NET_INSTANCES_SWITCH_2ND.name
+  }
+}
+
+output "EDGE_APP_INSTANCES" {
+  description = "Print edge-app-instances which have been created for every edge-node which joined the project"
+  sensitive   = true
+  value = {
+    id       = zedcloud_application_instance.APP_INSTANCES_VMS.id
+    name     = zedcloud_application_instance.APP_INSTANCES_VMS.name
+    password = random_password.vm_password.result
+  }
+}

@@ -2,18 +2,27 @@ terraform {
   required_providers {
     zedamigo = {
       source  = "localhost/andrei-zededa/zedamigo"
-      version = "= 0.9.11"
+      version = ">= 0.12.4"
     }
 
     zedcloud = {
       source  = "zededa/zedcloud"
-      version = "2.7.0"
+      version = "2.8.0"
     }
   }
 }
 
 provider "zedamigo" {
   # target = ""
+  # ssh {
+  #  user          = ""
+  #  use_agent     = true
+  #  forward_agent = true
+  #  proxy_jump    = ""
+  #
+  # remote_binary_path = ""
+  # }
+
   use_sudo = true
 }
 

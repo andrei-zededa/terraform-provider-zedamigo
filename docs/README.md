@@ -50,6 +50,15 @@ provider "zedamigo" {
   #   # password       = "..."
   #   # use_agent      = true                # use $SSH_AUTH_SOCK
   #
+  #   # Forward the local agent at $SSH_AUTH_SOCK to the target (like `ssh -A`),
+  #   # so commands the provider runs there — e.g. a zedamigo_wait_until script
+  #   # that sshes on to an edge node — can authenticate with your keys without
+  #   # copying any private key to the target. Defaults to false. Independent of
+  #   # use_agent, which is about authenticating TO the target.
+  #   # SECURITY: while a command runs, anyone who can read the forwarded socket
+  #   # on the target can use your loaded keys. Env: ZEDAMIGO_SSH_FORWARD_AGENT.
+  #   # forward_agent = false
+  #
   #   # Host key verification (fails closed): defaults to ~/.ssh/known_hosts.
   #   # known_hosts_file         = "~/.ssh/known_hosts"
   #   # host_key                 = "ssh-ed25519 AAAA..."
@@ -95,6 +104,31 @@ to `false`.
 
 Optional:
 
+- `forward_agent` (Boolean) Forward the local SSH agent at `$SSH_AUTH_SOCK` to the target, the equivalent of OpenSSH's
+`ForwardAgent yes` / `ssh -A`. Commands the provider runs on the target then get an `SSH_AUTH_SOCK`
+of their own and can authenticate onward with the operator's keys, without any private key ever
+being copied to the target. The typical use is a `zedamigo_wait_until` script that sshes from the
+target on to an edge node.
+
+Defaults to `false`. Independent of `use_agent`, which controls whether the agent is used to
+authenticate TO the target: either can be set without the other, though both need a running agent.
+
+Only the target receives the agent — jump hosts merely tunnel the connection.
+
+Forwarding is negotiated once, when the provider connects, and then applies to every command it runs
+(sshd allows the request only once per connection and binds the agent socket to the connection, not to
+a single session). The target's sshd must permit it — `AllowAgentForwarding yes`, the OpenSSH default,
+and no `no-agent-forwarding` restriction on the key in `authorized_keys` — or configuring the provider
+fails with an explicit error.
+
+Long-lived daemons the provider starts on the target (DHCP/RA servers and the like) do inherit the
+socket, but it stops working once the provider exits and its SSH connection closes, so do not rely on
+it there.
+
+SECURITY: anyone able to read the forwarded socket on the target — root, or the same user — can use
+your loaded keys for as long as the command runs. Only enable it for targets you trust, and prefer
+agent keys that are confirmation- or lifetime-constrained (`ssh-add -c`, `ssh-add -t`).
+Env: `ZEDAMIGO_SSH_FORWARD_AGENT`.
 - `host_key` (String) Pinned host public key in authorized_keys line format. Env: ZEDAMIGO_SSH_HOST_KEY.
 - `insecure_ignore_host_key` (Boolean) Skip host key verification (INSECURE; dev/test only). Env: ZEDAMIGO_SSH_INSECURE.
 - `known_hosts_file` (String) Path to a known_hosts file for host key verification. Defaults to ~/.ssh/known_hosts if present. Env: ZEDAMIGO_SSH_KNOWN_HOSTS.

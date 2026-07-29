@@ -217,7 +217,7 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
   name            = "EVE-K_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "main-pr-5989-k-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "17.0.0-lts-k-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -227,8 +227,14 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
    # (EVE-OS) as ttyS0, however on macOS (with vfkit) only virtio-serial is available
    # which will be hvc0. QEMU is now also switched to virtio-serial.
    # set_global dom0_extra_args "$dom0_extra_args console=ttyS0 hv_console=ttyS0 dom0_console=ttyS0"
-   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0"
+   set_global dom0_extra_args "$dom0_extra_args console=hvc0 hv_console=hvc0 dom0_console=hvc0 eve_nuke_disks=vda,sda,vdb,sdb"
    EOF
+}
+
+resource "zedamigo_host_reservation" "ENODE01_resources" {
+  cpus = 6
+  mem  = 16 # GB
+  devs = ["/dev/vg_sdb/reserve1"]
 }
 
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
@@ -237,11 +243,11 @@ resource "zedamigo_installed_edge_node" "ENODE_001" {
   name = "ENODE_001_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no     = zedcloud_edgenode.ENODE_001.serialno
-  installer_iso = "${path.module}/installer.iso"
+  installer_iso = zedamigo_eve_installer.eve_os_installer.filename
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm1-disk"
+    source   = zedamigo_host_reservation.ENODE01_resources.devs_reserved[0]
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -255,15 +261,21 @@ resource "zedamigo_installed_edge_node" "ENODE_001" {
   # ]
 }
 
+resource "zedamigo_host_reservation" "ENODE02_resources" {
+  cpus = 6
+  mem  = 16 # GB
+  devs = ["/dev/vg_sdc/reserve1"]
+}
+
 resource "zedamigo_installed_edge_node" "ENODE_002" {
-  name = "ENODE_001_INSTALL_${var.config_suffix}"
+  name = "ENODE_002_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no     = zedcloud_edgenode.ENODE_002.serialno
-  installer_iso = "${path.module}/installer.iso"
+  installer_iso = zedamigo_eve_installer.eve_os_installer.filename
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm2-disk"
+    source   = zedamigo_host_reservation.ENODE02_resources.devs_reserved[0]
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -277,15 +289,21 @@ resource "zedamigo_installed_edge_node" "ENODE_002" {
   # ]
 }
 
+resource "zedamigo_host_reservation" "ENODE03_resources" {
+  cpus = 4
+  mem  = 16 # GB
+  devs = ["/dev/vg_sdd/reserve1"]
+}
+
 resource "zedamigo_installed_edge_node" "ENODE_003" {
-  name = "ENODE_001_INSTALL_${var.config_suffix}"
+  name = "ENODE_003_INSTALL_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no     = zedcloud_edgenode.ENODE_003.serialno
-  installer_iso = "${path.module}/installer.iso"
+  installer_iso = zedamigo_eve_installer.eve_os_installer.filename
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm3-disk"
+    source   = zedamigo_host_reservation.ENODE03_resources.devs_reserved[0]
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -297,12 +315,6 @@ resource "zedamigo_installed_edge_node" "ENODE_003" {
   # "-drive", "if=none,id=persist,file=/dev/ubuntu-vg/vm3-disk,format=raw,cache=none,aio=io_uring,discard=unmap,detect-zeroes=unmap",
   # "-device", "virtio-blk-pci,drive=persist,num-queues=4"
   # ]
-}
-
-resource "time_sleep" "ENODE_001" {
-  depends_on = [zedamigo_installed_edge_node.ENODE_001]
-
-  create_duration = "1s"
 }
 
 #### This starts a QEMU VM with the disk onto which EVE-OS was installed basically
@@ -333,12 +345,10 @@ resource "time_sleep" "ENODE_001" {
 #### `ssh_port` is the value. Also `serial_console_log` is all the output
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_001" {
-  depends_on = [time_sleep.ENODE_001]
-
   name     = "ENODE_001_${var.config_suffix}"
-  cpus     = 6
-  cpu_pins = [14, 15, 4, 6, 10, 12]
-  mem      = "16G"
+  cpus     = zedamigo_host_reservation.ENODE01_resources.cpus_reserved_count
+  cpu_pins = zedamigo_host_reservation.ENODE01_resources.cpus_reserved
+  mem      = "${zedamigo_host_reservation.ENODE01_resources.mem_reserved_total_gb}G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_001.serial_no
   serial_port_server = true
@@ -347,7 +357,7 @@ resource "zedamigo_edge_node" "ENODE_001" {
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm1-disk"
+    source   = zedamigo_installed_edge_node.ENODE_001.disk[0].source
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -365,19 +375,11 @@ resource "zedamigo_edge_node" "ENODE_001" {
   ]
 }
 
-resource "time_sleep" "ENODE_002" {
-  depends_on = [zedamigo_installed_edge_node.ENODE_002]
-
-  create_duration = "600s"
-}
-
 resource "zedamigo_edge_node" "ENODE_002" {
-  depends_on = [time_sleep.ENODE_002]
-
   name     = "ENODE_002_${var.config_suffix}"
-  cpus     = 6
-  cpu_pins = [2, 3, 4, 5, 6, 7]
-  mem      = "16G"
+  cpus     = zedamigo_host_reservation.ENODE02_resources.cpus_reserved_count
+  cpu_pins = zedamigo_host_reservation.ENODE02_resources.cpus_reserved
+  mem      = "${zedamigo_host_reservation.ENODE02_resources.mem_reserved_total_gb}G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_002.serial_no
   serial_port_server = true
@@ -386,7 +388,7 @@ resource "zedamigo_edge_node" "ENODE_002" {
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm2-disk"
+    source   = zedamigo_installed_edge_node.ENODE_002.disk[0].source
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -404,19 +406,11 @@ resource "zedamigo_edge_node" "ENODE_002" {
   ]
 }
 
-resource "time_sleep" "ENODE_003" {
-  depends_on = [zedamigo_installed_edge_node.ENODE_003]
-
-  create_duration = "900s"
-}
-
 resource "zedamigo_edge_node" "ENODE_003" {
-  depends_on = [time_sleep.ENODE_003]
-
   name     = "ENODE_003_${var.config_suffix}"
-  cpus     = 6
-  cpu_pins = [8, 9, 10, 11, 12, 13]
-  mem      = "16G"
+  cpus     = zedamigo_host_reservation.ENODE03_resources.cpus_reserved_count
+  cpu_pins = zedamigo_host_reservation.ENODE03_resources.cpus_reserved
+  mem      = "${zedamigo_host_reservation.ENODE03_resources.mem_reserved_total_gb}G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_003.serial_no
   serial_port_server = true
@@ -425,7 +419,7 @@ resource "zedamigo_edge_node" "ENODE_003" {
 
   disk {
     type     = "device"
-    source   = "/dev/ubuntu-vg/vm3-disk"
+    source   = zedamigo_installed_edge_node.ENODE_003.disk[0].source
     format   = "raw"
     drive_if = "virtio"
     options  = ["cache=none", "aio=io_uring", "discard=unmap", "detect-zeroes=unmap"]
@@ -447,60 +441,55 @@ resource "zedamigo_edge_node" "ENODE_003" {
 # components are initialized (file /var/lib/all_components_initialized exists).
 # Without this barrier the cluster formation below races EVE-OS bringing up
 # its Kubernetes stack and fails or stalls.
-resource "null_resource" "WAIT_KUBE_READY" {
+#
+# The probe runs ON the zedamigo target, so `root@localhost:<ssh_port>` resolves
+# to the QEMU host-forwarded port on the machine that actually runs the edge
+# nodes. That is what makes this work with `target` set to a remote host, which
+# the previous `null_resource` + `local-exec` version got wrong: it probed the
+# machine running Terraform. The resource itself owns the retrying, so the script
+# is a single-shot probe with no loop, no deadline and no sleep.
+resource "zedamigo_wait_until" "KUBE_READY" {
   triggers = {
     enode_001_id = zedamigo_edge_node.ENODE_001.id
     enode_002_id = zedamigo_edge_node.ENODE_002.id
     enode_003_id = zedamigo_edge_node.ENODE_003.id
   }
 
-  provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command     = <<-EOT
-      set -u
-      declare -A PORTS=(
-        [ENODE_001]=${zedamigo_edge_node.ENODE_001.ssh_port}
-        [ENODE_002]=${zedamigo_edge_node.ENODE_002.ssh_port}
-        [ENODE_003]=${zedamigo_edge_node.ENODE_003.ssh_port}
-      )
+  timeout  = "20m"
+  interval = "10s"
+  # Backstop only: every ssh already has ConnectTimeout=5, so one full sweep is
+  # bounded well below this.
+  attempt_timeout = "60s"
 
-      SSH_OPTS=(
-        -o StrictHostKeyChecking=no
-        -o UserKnownHostsFile=/dev/null
-        -o ConnectTimeout=5
-        -o LogLevel=ERROR
-      )
+  script = <<-EOT
+    set -u
 
-      DEADLINE=$(( $(date +%s) + 1800 ))
-      declare -A READY=()
+    PORTS=(
+      ${zedamigo_edge_node.ENODE_001.ssh_port}
+      ${zedamigo_edge_node.ENODE_002.ssh_port}
+      ${zedamigo_edge_node.ENODE_003.ssh_port}
+    )
 
-      while :; do
-        all_ready=1
-        for n in "$${!PORTS[@]}"; do
-          if [[ -n "$${READY[$n]:-}" ]]; then continue; fi
-          port="$${PORTS[$n]}"
-          if ssh "$${SSH_OPTS[@]}" -p "$port" root@localhost \
-              'eve exec kube ls -l /var/lib/all_components_initialized' \
-              >/dev/null 2>&1; then
-            echo "[$(date -Is)] $n (port $port) ready."
-            READY[$n]=1
-          else
-            all_ready=0
-            echo "[$(date -Is)] $n (port $port) not ready yet."
-          fi
-        done
-        if [[ "$all_ready" -eq 1 ]]; then
-          echo "All edge nodes report kube readiness."
-          exit 0
-        fi
-        if (( $(date +%s) >= DEADLINE )); then
-          echo "Timed out after 30 minutes waiting for kube readiness." >&2
-          exit 1
-        fi
-        sleep 15
-      done
-    EOT
-  }
+    SSH_OPTS=(
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      -o ConnectTimeout=5
+      -o LogLevel=ERROR
+    )
+
+    rc=0
+    for port in "$${PORTS[@]}"; do
+      if ssh "$${SSH_OPTS[@]}" -p "$port" root@localhost \
+          'eve exec kube ls -l /var/lib/all_components_initialized' \
+          >/dev/null 2>&1; then
+        echo "port $port ready."
+      else
+        echo "port $port not ready yet." >&2
+        rc=1
+      fi
+    done
+    exit "$rc"
+  EOT
 }
 
 resource "zedcloud_edgenode_cluster" "TEST_CLUSTER" {
@@ -508,7 +497,7 @@ resource "zedcloud_edgenode_cluster" "TEST_CLUSTER" {
   title      = "TEST_CLUSTER_${var.config_suffix}"
   project_id = zedcloud_project.PROJECT.id
 
-  depends_on = [null_resource.WAIT_KUBE_READY]
+  depends_on = [zedamigo_wait_until.KUBE_READY]
 
   nodes {
     id                = zedcloud_edgenode.ENODE_001.id
