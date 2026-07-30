@@ -130,6 +130,21 @@ func (l *LocalExecutor) IsRunning(_ context.Context, pid int, expectedExe string
 	if !running {
 		return false, nil
 	}
+	// A zombie/defunct process still has a /proc entry but has terminated;
+	// treat it as not running, matching the SSHExecutor. This matters for
+	// daemons started via RunDetached, which stay children of the provider
+	// process and are never reaped when they die within the same run.
+	if statuses, err := p.Status(); err == nil {
+		for _, st := range statuses {
+			if st == process.Zombie {
+				return false, nil
+			}
+		}
+	} else if exists, xerr := process.PidExists(int32(pid)); xerr == nil && !exists {
+		// The process vanished between the liveness check and reading its
+		// status (e.g. it was reaped in that window): it is not running.
+		return false, nil
+	}
 	if expectedExe != "" {
 		exe, err := p.Exe()
 		if err != nil {

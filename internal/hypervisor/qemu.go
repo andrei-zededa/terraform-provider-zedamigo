@@ -46,7 +46,45 @@ const (
 	qemuGvproxyMAC          = "5a:94:ef:e4:0c:ee"
 	qemuGvproxyPollInterval = 100 * time.Millisecond
 	qemuGvproxyPollTimeout  = 3 * time.Second
+
+	// swtpmSocketWaitTimeout caps how long Start waits for the swtpm control
+	// socket to accept a connection before launching QEMU. The swtpm process
+	// exits every time an attached VM shuts down and its process monitor only
+	// restarts it about a second later, so a VM started right after another
+	// one released the same vTPM (the installer -> installed node sequence)
+	// would otherwise race the restart. The timeout is generous because the
+	// monitor backs off after repeated swtpm failures.
+	swtpmSocketWaitTimeout  = 30 * time.Second
+	swtpmSocketWaitInterval = 200 * time.Millisecond
 )
+
+// WaitForSwTPMSocket blocks until the swtpm control socket at socketPath
+// accepts a connection, or fails after timeout. QEMU's TPM emulator backend
+// needs the control channel connected at device-realize time (a chardev
+// "reconnect" option cannot help there), so the socket must be connectable
+// BEFORE QEMU starts. Checking that the socket file exists is not enough:
+// after swtpm exits, the stale socket file remains but connections are
+// refused.
+func WaitForSwTPMSocket(ctx context.Context, ex exec.Executor, socketPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		conn, err := ex.Dial(ctx, "unix", socketPath, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the swtpm socket %q did not accept a connection within %s"+
+				" (is the corresponding zedamigo_swtpm resource still running?): %w",
+				socketPath, timeout, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(swtpmSocketWaitInterval):
+		}
+	}
+}
 
 // startGvproxy launches gvproxy (via self-invocation) as a detached process
 // with port forwarding and returns the unix socket path for QEMU to connect to.
@@ -282,8 +320,13 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		)
 	}
 
-	// SwTPM.
+	// SwTPM. The swtpm process may be in its restart window right now (it
+	// exits together with the previous VM that used it), so wait until its
+	// socket actually accepts connections before starting QEMU.
 	if conf.SwTPMSocket != "" {
+		if err := WaitForSwTPMSocket(ctx, h.Exec, conf.SwTPMSocket, swtpmSocketWaitTimeout); err != nil {
+			return err
+		}
 		qemuArgs = append(qemuArgs,
 			"-chardev", fmt.Sprintf("socket,id=chrtpm,path=%s", conf.SwTPMSocket),
 			"-tpmdev", "emulator,id=tpm0,chardev=chrtpm",

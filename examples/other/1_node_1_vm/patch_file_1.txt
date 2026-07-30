@@ -1,5 +1,0 @@
-Hello from patch envelope file #1!
-
-This is an example text file published to the edge-app-instance via a
-Zedcloud patch envelope. The application running inside the VM can read this
-file from its patch-envelope mount point.

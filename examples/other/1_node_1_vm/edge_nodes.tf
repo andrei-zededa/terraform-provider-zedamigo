@@ -109,16 +109,9 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
    EOF
 }
 
-resource "zedamigo_host_reservation" "ENODE_TEST_resources" {
-  cpus = 2
-  mem  = 4 # GB
-}
-
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
 #### created and run the install process.
 resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
-  depends_on = [zedamigo_host_reservation.ENODE_TEST_resources]
-
   name = "ENODE_TEST_INSTALL_AAAA_${var.config_suffix}"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   # serial_no       = zedcloud_edgenode.ENODE_TEST_AAAA.serialno
@@ -156,8 +149,8 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus = zedamigo_host_reservation.ENODE_TEST_resources.cpus_reserved_count
-  mem  = "${zedamigo_host_reservation.ENODE_TEST_resources.mem_reserved_total_gb}G"
+  cpus = 2 
+  mem  = "4G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true

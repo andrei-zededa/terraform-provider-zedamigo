@@ -32,7 +32,7 @@ and the setup can be managed end-to-end from a single terraform configuration
 | vfkit | -- | Yes | Required (macOS) | VM hypervisor (Virtualization.framework) |
 | ip (iproute2) | Yes | -- | Required (Linux) | Networking resources |
 | bash | Yes | Yes | Required | Script execution |
-| swtpm | Yes | Yes | Optional | SwTPM resource |
+| swtpm | Yes | Yes | Optional | SwTPM resource (on macOS the vTPM cannot be attached to VMs, see the macOS limitations) |
 | genisoimage | Yes | Yes | Optional | Cloud Init ISO resource |
 | taskset | Yes | -- | Optional | CPU pinning |
 
@@ -234,7 +234,8 @@ brew install qemu vfkit
 ### Optional dependencies
 
 ```shell
-# SwTPM support
+# SwTPM support (NOTE: the swtpm process runs fine on macOS, but vfkit
+# cannot attach it to any VM -- see Limitations below).
 brew install swtpm
 
 # Cloud Init ISO support (provides mkisofs)
@@ -251,6 +252,16 @@ Install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-ins
   `dhcp6_server`, `radv`) and the monitoring daemons (`internet_monitor`,
   `monitor_system_usage`) are **not supported** on macOS.
 - Nested virtualization (EVE-OS running VMs inside the VM) requires **Apple M3 or later**.
+- **The vTPM (`zedamigo_swtpm`) cannot be attached to VMs on macOS.** The swtpm
+  binary itself works fine on macOS (`brew install swtpm`) and the
+  `zedamigo_swtpm` resource will run, but no VM can use it: Apple's
+  Virtualization.framework does not provide any virtual TPM device, so vfkit
+  has nothing to connect the swtpm socket to (a framework limitation, not a
+  vfkit one). The `swtpm_socket` attribute of the `zedamigo_edge_node` /
+  `zedamigo_installed_edge_node` resources is therefore ignored on macOS and
+  EVE-OS nodes run without a TPM: no TPM-backed device certificate, no
+  TPM-sealed vault, empty PCRs. If a vTPM is a hard requirement, use a Linux
+  host (QEMU/KVM).
 - **Edge node onboarding must use the soft serial on macOS.** On Linux (QEMU), the
   VM serial number can be set via SMBIOS (`-smbios type=1,serial=...`) and EVE-OS
   reads it through `dmidecode` as the hardware serial number. This allows setting
@@ -371,7 +382,7 @@ from the source code in the [docs/](docs/) folder.
 | [cloud_init_iso](docs/resources/cloud_init_iso.md) | ✅ | ✅ | Requires `genisoimage` |
 | [virtual_machine](docs/resources/virtual_machine.md) | ✅ | ✅ | Alias for edge_node |
 | [vm](docs/resources/vm.md) | ✅ | ✅ | Alias for edge_node |
-| [swtpm](docs/resources/swtpm.md) | WIP | WIP | |
+| [swtpm](docs/resources/swtpm.md) | ✅ | ❌ | Software TPM 2.0 (vTPM) for edge node VMs; the swtpm process runs on macOS but Virtualization.framework/vfkit cannot attach it to VMs |
 | [netns](docs/resources/netns.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
 | [bridge](docs/resources/bridge.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
 | [tap](docs/resources/tap.md) | ✅ | ❌ | Linux only, needs `use_sudo = true` |
