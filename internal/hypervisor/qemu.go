@@ -286,9 +286,19 @@ func (h *QEMUHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPaths
 		if gvErr != nil {
 			return fmt.Errorf("start gvproxy: %w", gvErr)
 		}
+		// The NIC must be created with "-nic" (board NICs are instantiated at
+		// machine init, in command-line order) so it claims the first free PCI
+		// slot and becomes the guest's eth0. A "-netdev"+"-device" pair is
+		// realized only after every "-nic" — including tap NICs from
+		// extra_args — which would push the gvproxy NIC to the highest PCI
+		// slot and make it the guest's LAST ethN. "-nic stream,..." itself is
+		// not expressible (the nested addr.* options only parse for
+		// "-netdev"), so bridge the stream netdev onto hub 0 and attach the
+		// NIC as "-nic hubport" on the same hub.
 		qemuArgs = append(qemuArgs,
 			"-netdev", fmt.Sprintf("stream,id=usernet0,addr.type=unix,addr.path=%s", gvSocketPath),
-			"-device", fmt.Sprintf("virtio-net-pci,netdev=usernet0,mac=%s", qemuGvproxyMAC),
+			"-netdev", "hubport,id=usernet0hub,hubid=0,netdev=usernet0",
+			"-nic", fmt.Sprintf("hubport,hubid=0,model=virtio,mac=%s", qemuGvproxyMAC),
 		)
 	} else {
 		qemuArgs = append(qemuArgs, "-nic", conf.Nic0)
