@@ -226,6 +226,7 @@ func (r *InternetMonitor) Configure(ctx context.Context, req resource.ConfigureR
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_internet_monitor", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "Internet monitor resource configure debugging", traceData)

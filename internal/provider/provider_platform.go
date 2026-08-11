@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//go:build linux && amd64
-
 package provider
 
 import (
@@ -22,7 +20,23 @@ import (
 //go:embed embedded_ovmf/OVMF_VARS.fd
 var embeddedOVMF embed.FS
 
+// configurePlatformTools looks up the tools required for the target platform
+// and creates the matching hypervisor: QEMU on linux/amd64, vfkit on
+// darwin/arm64.
 func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
+	switch {
+	case zaConf.TargetOS == "linux" && zaConf.TargetArch == "amd64":
+		configureQEMUTools(ctx, zaConf, resp)
+	case zaConf.TargetOS == "darwin" && zaConf.TargetArch == "arm64":
+		configureVFKitTools(ctx, zaConf, resp)
+	default:
+		resp.Diagnostics.AddError("Unsupported target platform.",
+			fmt.Sprintf("Target %q is %s/%s; supported target platforms are linux/amd64 (QEMU) and darwin/arm64 (vfkit).",
+				zaConf.Target, zaConf.TargetOS, zaConf.TargetArch))
+	}
+}
+
+func configureQEMUTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
 	// Extract OVMF files onto the target.
 	if err := zaConf.Exec.MkdirAll(ctx, filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
 		resp.Diagnostics.AddError(
@@ -144,6 +158,75 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 		UseSudo:      zaConf.UseSudo,
 		SudoPath:     zaConf.Sudo,
 		Exec:         zaConf.Exec,
+	}
+}
+
+func configureVFKitTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
+	// Look up vfkit.
+	vfkit, err := zaConf.Exec.LookPath(ctx, "vfkit")
+	if err != nil {
+		resp.Diagnostics.AddError("Can't find the `vfkit` executable.",
+			fmt.Sprintf("Can't find the `vfkit` executable. Install via: brew install vfkit. Got error: %v", err))
+		return
+	}
+
+	// qemu-img is needed for format conversion (qcow2 -> raw).
+	qi, err := zaConf.Exec.LookPath(ctx, "qemu-img")
+	if err != nil {
+		resp.Diagnostics.AddError("Can't find the `qemu-img` executable.",
+			fmt.Sprintf("Can't find the `qemu-img` executable. Install via: brew install qemu. Got error: %v", err))
+		return
+	}
+
+	zaConf.QemuImg = qi
+
+	// swtpm (optional).
+	st, err := zaConf.Exec.LookPath(ctx, "swtpm")
+	if err != nil {
+		resp.Diagnostics.AddWarning("Can't find the `swtpm` executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the SwTPM resource. Can't find `swtpm`, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.Swtpm = st
+
+	// genisoimage (optional).
+	gencmd, err := zaConf.Exec.LookPath(ctx, "genisoimage")
+	if err != nil {
+		resp.Diagnostics.AddWarning("Can't find the `genisoimage` executable.",
+			fmt.Sprintf("This warning can be ignored if you DO NOT use the Cloud Init ISO resource. Can't find `genisoimage`, got error: %v", err))
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	zaConf.GenISOImage = gencmd
+
+	// ip command not available on macOS, leave zaConf.IP empty. The networking
+	// resources that need `ip` reject non-Linux targets with a clear error via
+	// requireLinuxTarget in their Configure methods.
+
+	// Detect nested virtualization support (requires Apple M3+).
+	supportsNested, cpuBrand := hypervisor.SupportsNestedVirtualization(ctx, zaConf.Exec, zaConf.LibPath)
+
+	// Create vfkit hypervisor. gvproxy is embedded (self-invoked).
+	zaConf.Hypervisor = &hypervisor.VFKitHypervisor{
+		VfkitPath:          vfkit,
+		QemuImgPath:        qi,
+		SupportsNestedVirt: supportsNested,
+		Exec:               zaConf.Exec,
+	}
+
+	if !supportsNested {
+		resp.Diagnostics.AddWarning(
+			"Nested virtualization not available",
+			fmt.Sprintf(
+				"Detected CPU: %s. Nested virtualization requires Apple M3 or later. "+
+					"VMs will run without nested virtualization, which means app instances "+
+					"inside EVE-OS will not work. Consider upgrading to an M3+ Mac for full functionality.",
+				cpuBrand,
+			),
+		)
 	}
 }
 

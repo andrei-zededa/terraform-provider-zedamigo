@@ -262,6 +262,7 @@ func (r *RADV) Configure(ctx context.Context, req resource.ConfigureRequest, res
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_radv", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "RADV resource configure debugging", traceData)

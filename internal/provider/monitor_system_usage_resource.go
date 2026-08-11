@@ -181,6 +181,7 @@ func (r *MonitorSystemUsage) Configure(ctx context.Context, req resource.Configu
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_monitor_system_usage", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "Monitor system usage resource configure debugging", traceData)

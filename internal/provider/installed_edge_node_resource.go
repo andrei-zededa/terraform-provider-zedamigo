@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/undent"
@@ -272,7 +271,7 @@ func (r *InstalledNode) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	if runtime.GOOS == "darwin" && data.SerialType.ValueString() == "serial" {
+	if r.providerConf.TargetOS == "darwin" && data.SerialType.ValueString() == "serial" {
 		resp.Diagnostics.AddError("Invalid serial_type for macOS",
 			`On macOS (vfkit), only serial_type = "virtio" is supported.`)
 		return

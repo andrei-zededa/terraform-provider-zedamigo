@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/hypervisor"
@@ -378,10 +377,10 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	// gvproxy (and the macOS vfkit backend, which always uses gvproxy) provides
 	// networking itself with a fixed set of port forwards and ignores the nic0
 	// string entirely. Warn when a custom nic0 would be silently dropped.
-	gvproxyActive := (!data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool()) || runtime.GOOS == "darwin"
+	gvproxyActive := (!data.UseGvproxy.IsNull() && data.UseGvproxy.ValueBool()) || r.providerConf.TargetOS == "darwin"
 	if customNic0 && gvproxyActive {
 		reason := "use_gvproxy is set to true"
-		if runtime.GOOS == "darwin" {
+		if r.providerConf.TargetOS == "darwin" {
 			reason = "the macOS vfkit backend always uses gvproxy"
 		}
 		resp.Diagnostics.AddWarning(
@@ -420,19 +419,18 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 			return
 		}
 
-		// Validate that taskset is available on Linux when cpu_pins is configured.
-		if runtime.GOOS == "linux" {
-			qh, ok := r.providerConf.Hypervisor.(*hypervisor.QEMUHypervisor)
-			if ok && qh.TasksetPath == "" {
-				resp.Diagnostics.AddError("Missing taskset binary",
-					"cpu_pins is configured but the 'taskset' command was not found on PATH. "+
-						"Install the util-linux package (e.g. 'apt install util-linux' or 'dnf install util-linux').")
-				return
-			}
+		// Validate that taskset is available when cpu_pins is configured
+		// (QEMU targets only; the type assertion excludes vfkit).
+		qh, ok := r.providerConf.Hypervisor.(*hypervisor.QEMUHypervisor)
+		if ok && qh.TasksetPath == "" {
+			resp.Diagnostics.AddError("Missing taskset binary",
+				"cpu_pins is configured but the 'taskset' command was not found on PATH. "+
+					"Install the util-linux package (e.g. 'apt install util-linux' or 'dnf install util-linux').")
+			return
 		}
 	}
 
-	if runtime.GOOS == "darwin" && data.SerialType.ValueString() == "serial" {
+	if r.providerConf.TargetOS == "darwin" && data.SerialType.ValueString() == "serial" {
 		resp.Diagnostics.AddError("Invalid serial_type for macOS",
 			`On macOS (vfkit), only serial_type = "virtio" is supported.`)
 		return
@@ -468,7 +466,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	}
 
 	// Handle serial console config.
-	if runtime.GOOS == "darwin" {
+	if r.providerConf.TargetOS == "darwin" {
 		// On macOS (vfkit), always PTY mode. SerialToFile is the tailer output destination.
 		vmConf.SerialToFile = filepath.Join(d, "serial_console_run.log")
 	} else if data.SerialPortServer.ValueBool() {
@@ -512,7 +510,7 @@ func (r *EdgeNode) Create(ctx context.Context, req resource.CreateRequest, resp 
 	tflog.Trace(ctx, "Edge Node Resource created succesfully")
 
 	// Launch tailer for serial console output.
-	if runtime.GOOS == "darwin" {
+	if r.providerConf.TargetOS == "darwin" {
 		// On macOS (vfkit), read PTY path written by vfkit.Start() and launch PTY tailer.
 		ptyPathBytes, err := r.providerConf.Exec.ReadFile(ctx, filepath.Join(d, "serial.pty"))
 		if err != nil {

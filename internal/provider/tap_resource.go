@@ -156,6 +156,7 @@ func (r *TAP) Configure(ctx context.Context, req resource.ConfigureRequest, resp
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_tap", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "TAP resource configure debugging", traceData)

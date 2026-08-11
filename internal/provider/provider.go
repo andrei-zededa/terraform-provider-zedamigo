@@ -44,7 +44,13 @@ var (
 // the exact paths of various commands(executables) that are needed by the various
 // resources of the provider.
 type ZedAmigoProviderConfig struct {
-	Target      string
+	Target string
+	// TargetOS and TargetArch are the operating system and architecture of
+	// `Target` (GOOS/GOARCH values, e.g. "linux"/"amd64"), detected at
+	// Configure time. They select the hypervisor backend and any per-platform
+	// resource behavior.
+	TargetOS    string
+	TargetArch  string
 	LibPath     string
 	UseSudo     bool
 	Sudo        string
@@ -265,6 +271,18 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	}
 
 	ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
+
+	// Detect the target platform; it selects the hypervisor backend (QEMU on
+	// linux/amd64, vfkit on darwin/arm64) and per-platform resource behavior.
+	tOS, tArch, err := detectTargetPlatform(ctx, zaConf.Exec, zaConf.LibPath)
+	if err != nil {
+		resp.Diagnostics.AddError("Can't detect the target platform.",
+			fmt.Sprintf("Can't detect the target OS and architecture: %v", err))
+		return
+	}
+	zaConf.TargetOS = tOS
+	zaConf.TargetArch = tArch
+	ctx = tflog.SetField(ctx, "target_platform", tOS+"/"+tArch)
 
 	if zaConf.UseSudo {
 		sudo, err := zaConf.Exec.LookPath(ctx, "sudo")
