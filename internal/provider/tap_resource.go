@@ -235,6 +235,17 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		}
 	}
 
+	// Validate the address here rather than at the point of use: when netns is
+	// set the address is applied asynchronously by the mover daemon, where a
+	// malformed value would only ever surface in its status file.
+	if !data.IPv4Address.IsNull() && !data.IPv4Address.IsUnknown() {
+		if _, _, err := net.ParseCIDR(data.IPv4Address.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Invalid IPv4 address format",
+				fmt.Sprintf("IPv4 address must be in CIDR format (e.g., '192.168.1.1/24'): %s", err.Error()))
+			return
+		}
+	}
+
 	hasNetNS := !data.NetNS.IsNull() && !data.NetNS.IsUnknown()
 
 	if hasNetNS {
@@ -281,14 +292,6 @@ func (r *TAP) Create(ctx context.Context, req resource.CreateRequest, resp *reso
 		// Configure an IPv4 address if specified.
 		if !data.IPv4Address.IsNull() && !data.IPv4Address.IsUnknown() {
 			addr := data.IPv4Address.ValueString()
-
-			// Validate the CIDR format
-			_, _, err := net.ParseCIDR(addr)
-			if err != nil {
-				resp.Diagnostics.AddError("Invalid IPv4 address format",
-					fmt.Sprintf("IPv4 address must be in CIDR format (e.g., '192.168.1.1/24'): %s", err.Error()))
-				return
-			}
 
 			moreArgs := []string{"addr", "add", addr, "dev", tapIf}
 			res, err := r.providerConf.Exec.Run(ctx, d, ipCmd, append(ipArgs, moreArgs...)...)
@@ -347,7 +350,14 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 				return
 			}
 		} else {
-			// TAP is still in the default namespace (pending or error).
+			// TAP is still in the default namespace (pending or error). The
+			// mover only applies master/state/ipv4_address once the TAP is
+			// inside the namespace, so reading them back from the default
+			// namespace would report values which simply have not been applied
+			// yet as drift — and this resource has no Update, so that diff is
+			// unrecoverable. Keep what we were asked for and let mover_status
+			// carry the progress; only MTU is genuinely set here at create.
+			master, state, addr := data.Master, data.State, data.IPv4Address
 			ipCmd, ipArgs := buildIPCommand(r.providerConf, "")
 			if diags, err := r.readTAP(ctx, d, ipCmd, ipArgs, &data); err != nil {
 				if errchecker.ContainsAny(err, intfNotFoundStrs) || errchecker.DiagsAny(diags, intfNotFoundStrs) {
@@ -358,6 +368,7 @@ func (r *TAP) Read(ctx context.Context, req resource.ReadRequest, resp *resource
 				resp.Diagnostics.Append(diags...)
 				return
 			}
+			data.Master, data.State, data.IPv4Address = master, state, addr
 		}
 	} else {
 		data.MoverStatus = types.StringValue("")
@@ -535,6 +546,10 @@ func (r *TAP) readTAP(ctx context.Context, resPath string, ipCmd string, ipArgs 
 		return res.Diagnostics(), fmt.Errorf("can't retrieve TAP '%s' addreses: %w", tapIf, err)
 	}
 	// Look for IPv4 address in CIDR format: inet 192.168.1.1/24 brd ...
+	// Null out when the interface carries no address, the same way master is
+	// handled above: leaving the previous value in place would keep a stale
+	// address in the state forever and hide the drift instead of reporting it.
+	model.IPv4Address = types.StringNull()
 	addrRegex := regexp.MustCompile(`inet (\d+\.\d+\.\d+\.\d+/\d+)`)
 	if matches := addrRegex.FindStringSubmatch(res.Stdout); len(matches) > 1 {
 		// Validate using net.ParseCIDR to ensure it's properly formatted
@@ -562,10 +577,14 @@ func (r *TAP) startTAPMover(ctx context.Context, d string, data *TAPModel, netns
 	if !data.State.IsNull() && !data.State.IsUnknown() {
 		state = data.State.ValueString()
 	}
+	ipv4 := ""
+	if !data.IPv4Address.IsNull() && !data.IPv4Address.IsUnknown() {
+		ipv4 = data.IPv4Address.ValueString()
+	}
 
 	config := fmt.Sprintf(
-		"tap_name: %q\nnetns: %q\nmaster: %q\nstate: %q\nstatus_file: %q\npoll_interval_ms: 500\ntimeout_s: 300\nuse_sudo: %t\nsudo_path: %q\nip_path: %q\n",
-		tapIf, netns, master, state, statusFile,
+		"tap_name: %q\nnetns: %q\nmaster: %q\nstate: %q\nipv4_address: %q\nstatus_file: %q\npoll_interval_ms: 500\ntimeout_s: 300\nuse_sudo: %t\nsudo_path: %q\nip_path: %q\n",
+		tapIf, netns, master, state, ipv4, statusFile,
 		r.providerConf.UseSudo, r.providerConf.Sudo, r.providerConf.IP,
 	)
 

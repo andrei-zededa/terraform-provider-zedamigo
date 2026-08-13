@@ -25,6 +25,7 @@ type tapMoverCfg struct {
 	NetNS          string `yaml:"netns"`
 	Master         string `yaml:"master"`
 	State          string `yaml:"state"`
+	IPv4Address    string `yaml:"ipv4_address"`
 	StatusFile     string `yaml:"status_file"`
 	PollIntervalMs int    `yaml:"poll_interval_ms"`
 	TimeoutS       int    `yaml:"timeout_s"`
@@ -71,6 +72,7 @@ func tapMoverMain() {
 		"netns", cfg.NetNS,
 		"master", cfg.Master,
 		"state", cfg.State,
+		"ipv4_address", cfg.IPv4Address,
 		"timeout_s", cfg.TimeoutS,
 	)
 
@@ -158,6 +160,23 @@ func moveTAP(cfg tapMoverCfg, operstate string, logger *slog.Logger) {
 	if cfg.Master != "" {
 		if err := runIPInNetns(cfg, "link", "set", cfg.TapName, "master", cfg.Master); err != nil {
 			errMsg := fmt.Sprintf("failed to set master on TAP inside netns: %v", err)
+			logger.Error(errMsg)
+			writeStatus(cfg.StatusFile, tapMoverStatus{
+				Status:    "error",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Error:     errMsg,
+			})
+			os.Exit(1)
+		}
+	}
+
+	// Configure the IPv4 address inside the netns (if specified). This MUST
+	// happen after the move: the kernel flushes the L3 addresses off a link
+	// when it changes network namespace, so anything configured beforehand in
+	// the default namespace would be gone by now.
+	if cfg.IPv4Address != "" {
+		if err := runIPInNetns(cfg, "addr", "add", cfg.IPv4Address, "dev", cfg.TapName); err != nil {
+			errMsg := fmt.Sprintf("failed to add IPv4 address on TAP inside netns: %v", err)
 			logger.Error(errMsg)
 			writeStatus(cfg.StatusFile, tapMoverStatus{
 				Status:    "error",

@@ -52,7 +52,25 @@ func sshSchemaBlock() schema.Block {
 		SSH connection settings used when |target| is a remote host (anything other than
 		|localhost|). All attributes are optional and each has a |ZEDAMIGO_SSH_*| environment
 		variable fallback. Provide at least one authentication method: |password|,
-		|private_key|/|private_key_file|, or |use_agent|.`),
+		|private_key|/|private_key_file|, or |use_agent|.
+
+		NOTE: the target's sshd |MaxSessions| bounds the |-parallelism| you can apply with. Everything
+		the provider does on a remote target goes over ONE SSH connection: each command is a new session
+		channel on it and SFTP permanently holds one more. OpenSSH counts those against |MaxSessions|
+		(default 10) per connection and refuses the ones over the limit, which surfaces as a resource
+		failing with:
+
+		    ssh: rejected: connect failed (open failed)
+
+		It hits whichever resource loses the race, so it looks arbitrary, and the same command run by
+		hand on the target works fine. A config that creates many host-networking resources at once —
+		|zedamigo_netns| / |zedamigo_tap| / |zedamigo_dhcp_server| for a multi-port edge node, say — is
+		what reaches it. Either apply with a lower |-parallelism| (leave a couple of sessions of
+		headroom under the target's limit) or raise |MaxSessions| there. Jump hosts do not enter into
+		it: they carry a single |direct-tcpip| channel, which is not counted.
+
+		The target's effective limit is the |maxsessions| line of |sshd -T|; sshd logs |no more sessions|
+		when it refuses one.`),
 		Attributes: map[string]schema.Attribute{
 			"user": schema.StringAttribute{
 				Description: "SSH username. Defaults to the current local user. Env: ZEDAMIGO_SSH_USER.",

@@ -11,7 +11,7 @@ resource "zedcloud_brand" "QEMU" {
 # lot more useful when the model is not lying about the size of the node.
 resource "zedcloud_model" "QEMU_VM" {
   name        = "QEMU_VM_TEST_${var.config_suffix}"
-  title       = "QEMU_VM with a single NIC, ${var.EDGE_NODE_CPUS} vCPUs and ${var.EDGE_NODE_MEM_GB}GB RAM"
+  title       = "QEMU_VM with ${length(local.EXTRA_MGMT_PORTS) + 1} NICs, ${var.EDGE_NODE_CPUS} vCPUs and ${var.EDGE_NODE_MEM_GB}GB RAM"
   origin_type = "ORIGIN_LOCAL"
   brand_id    = zedcloud_brand.QEMU.id
   attr = {
@@ -23,6 +23,8 @@ resource "zedcloud_model" "QEMU_VM" {
   state          = "SYS_MODEL_STATE_ACTIVE"
   type           = upper(var.EDGE_NODE_ARCH)
 
+  # eth0: the QEMU user-mode ("SLIRP") NIC, the only port of this edge-node
+  # which actually reaches the controller, hence cost 0.
   io_member_list {
     assigngrp    = "eth0"
     cbattr       = {}
@@ -35,5 +37,30 @@ resource "zedcloud_model" "QEMU_VM" {
     usage        = "ADAPTER_USAGE_MANAGEMENT"
     usage_policy = {}
     ztype        = "IO_TYPE_ETH"
+  }
+
+  # eth1..eth9: the nine extra management ports. Zedcloud only accepts an
+  # `interfaces` entry on an edge-node for a port which its model declares, so
+  # the model has to be kept in step with `local.EXTRA_MGMT_PORTS`
+  # (host_networking.tf) — which is why both are generated from it.
+  #
+  # `for_each` over a map iterates in key order, so the members are emitted as
+  # eth1, eth2, ... every time and the list does not churn between plans.
+  dynamic "io_member_list" {
+    for_each = local.EXTRA_MGMT_PORTS
+
+    content {
+      assigngrp    = io_member_list.key
+      cbattr       = {}
+      cost         = io_member_list.value.cost
+      logicallabel = io_member_list.key
+      phyaddrs = {
+        Ifname = io_member_list.key
+      }
+      phylabel     = io_member_list.key
+      usage        = "ADAPTER_USAGE_MANAGEMENT"
+      usage_policy = {}
+      ztype        = "IO_TYPE_ETH"
+    }
   }
 }

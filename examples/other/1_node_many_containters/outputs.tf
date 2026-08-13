@@ -59,3 +59,31 @@ output "EDGE_NODE_SSH_PORT" {
   description = "Localhost port forwarded to TCP port 22 of the edge-node (EVE-OS)"
   value       = zedamigo_edge_node.ENODE_TEST_VM.ssh_port
 }
+
+output "EXTRA_MGMT_PORTS" {
+  description = "The nine extra management ports of the edge-node and the host network namespace each one is wired into"
+  value = {
+    for name, port in local.EXTRA_MGMT_PORTS : name => {
+      netns      = zedamigo_netns.MGMT[name].name
+      tap        = zedamigo_tap.MGMT[name].name
+      subnet     = port.subnet
+      gateway    = zedamigo_tap.MGMT[name].ipv4_address
+      dhcp_range = "${cidrhost(port.subnet, 70)} - ${cidrhost(port.subnet, 79)}"
+      cost       = port.cost
+    }
+  }
+}
+
+output "EDGE_NODE_QMP_SOCKET" {
+  description = "Path, ON THE PROVIDER TARGET, of the QMP socket of the edge-node VM — the one the DISABLE_SLIRP_NIC barrier talks to"
+  value       = local.QMP_SOCKET_PATH
+}
+
+output "SLIRP_NIC_DISABLED" {
+  description = "Outcome of the barrier which waits for the edge-node to report in to Zedcloud and then takes the link of the QEMU user-mode NIC down"
+  value = {
+    attempts = zedamigo_wait_until.DISABLE_SLIRP_NIC.attempts
+    elapsed  = zedamigo_wait_until.DISABLE_SLIRP_NIC.elapsed
+    result   = trimspace(zedamigo_wait_until.DISABLE_SLIRP_NIC.stdout)
+  }
+}
