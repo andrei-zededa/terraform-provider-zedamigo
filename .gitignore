@@ -12,5 +12,7 @@ terraform-provider-zedamigo*
 **/.envrc
 **/terraform.tfvars
 **/terraform.tfvars.json
+**/override.tf
+**/*_override.tf
 misc/
 **/*.iso

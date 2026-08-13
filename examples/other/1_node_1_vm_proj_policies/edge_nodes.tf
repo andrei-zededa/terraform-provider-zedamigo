@@ -76,8 +76,8 @@ resource "zedcloud_edgenode" "ENODE_TEST_AAAA" {
     intf_usage = "ADAPTER_USAGE_APP_SHARED"
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 30
-    netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH"
+    netname    = "" # interface eth3 of type IO_TYPE_ETH_PF cannot have a network name assigned
+    ztype      = "IO_TYPE_ETH_PF"
     tags       = {}
   }
 
@@ -149,13 +149,15 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus = 2 
+  cpus = 2
   mem  = "4G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
   serial_port_server = true
   disk_image_base    = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.disk_image
   ovmf_vars_src      = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.ovmf_vars
+
+  # use_gvproxy = true
 
   extra_qemu_args = [
     # Plain virtio NIC mode.
