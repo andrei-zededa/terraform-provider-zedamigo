@@ -91,6 +91,7 @@ func (r *NetNS) Configure(ctx context.Context, req resource.ConfigureRequest, re
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_netns", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "NetNS resource configure debugging", traceData)

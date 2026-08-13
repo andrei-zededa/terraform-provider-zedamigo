@@ -10,6 +10,7 @@ import (
 	osuser "os/user"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -403,6 +404,45 @@ func knownHostsCallback(m *SSHModel) (ssh.HostKeyCallback, error) {
 		return nil, fmt.Errorf("can't load known_hosts file %q: %w", khFile, err)
 	}
 	return cb, nil
+}
+
+// detectTargetPlatform returns the target's OS and architecture as GOOS/GOARCH
+// values. For a local target these are the provider's own runtime values; for
+// a remote target they are probed with `uname -sm` and normalized the same way
+// install.sh does.
+func detectTargetPlatform(ctx context.Context, ex exec.Executor, logDir string) (osName, arch string, err error) {
+	if ex.IsLocal() {
+		return runtime.GOOS, runtime.GOARCH, nil
+	}
+
+	res, err := ex.Run(ctx, logDir, "uname", "-sm")
+	if err != nil {
+		return "", "", fmt.Errorf("can't run `uname -sm` on the target: %w", err)
+	}
+	fields := strings.Fields(res.Stdout)
+	if len(fields) != 2 {
+		return "", "", fmt.Errorf("unexpected `uname -sm` output %q", strings.TrimSpace(res.Stdout))
+	}
+
+	switch fields[0] {
+	case "Linux":
+		osName = "linux"
+	case "Darwin":
+		osName = "darwin"
+	default:
+		return "", "", fmt.Errorf("unsupported target operating system %q", fields[0])
+	}
+
+	switch fields[1] {
+	case "x86_64":
+		arch = "amd64"
+	case "aarch64", "arm64":
+		arch = "arm64"
+	default:
+		return "", "", fmt.Errorf("unsupported target architecture %q", fields[1])
+	}
+
+	return osName, arch, nil
 }
 
 // resolveRemoteLibPath resolves the default lib_path on the remote host from

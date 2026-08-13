@@ -195,6 +195,7 @@ func (r *DHCP6Server) Configure(ctx context.Context, req resource.ConfigureReque
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_dhcp6_server", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "DHCPv6 server resource configure debugging", traceData)

@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//go:build darwin && arm64
-
 package hypervisor
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -19,8 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/cmd"
-	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/socket"
+	"github.com/andrei-zededa/terraform-provider-zedamigo/internal/exec"
 	vfconfig "github.com/crc-org/vfkit/pkg/config"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -30,16 +23,21 @@ type VFKitHypervisor struct {
 	VfkitPath          string
 	QemuImgPath        string
 	SupportsNestedVirt bool
+
+	// Exec runs all commands, filesystem and socket operations on the target
+	// (localhost or, in remote mode, the SSH host).
+	Exec exec.Executor
 }
 
-// SupportsNestedVirtualization checks if the CPU is Apple M3 or later
-// by parsing `sysctl -n machdep.cpu.brand_string` (e.g. "Apple M3 Pro").
-func SupportsNestedVirtualization() (supported bool, cpuBrand string) {
-	out, err := exec.Command("sysctl", "-n", "machdep.cpu.brand_string").Output()
+// SupportsNestedVirtualization checks if the target CPU is Apple M3 or later
+// by parsing `sysctl -n machdep.cpu.brand_string` (e.g. "Apple M3 Pro") run on
+// the target.
+func SupportsNestedVirtualization(ctx context.Context, ex exec.Executor, logDir string) (supported bool, cpuBrand string) {
+	res, err := ex.Run(ctx, logDir, "sysctl", "-n", "machdep.cpu.brand_string")
 	if err != nil {
 		return false, "unknown"
 	}
-	brand := strings.TrimSpace(string(out))
+	brand := strings.TrimSpace(res.Stdout)
 	re := regexp.MustCompile(`Apple M(\d+)`)
 	matches := re.FindStringSubmatch(brand)
 	if len(matches) < 2 {
@@ -82,7 +80,7 @@ func (h *VFKitHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPa
 				return paths, fmt.Errorf("unable to create disk %d image: %w", i, err)
 			}
 			if disk.HasSize {
-				res, err := cmd.Run(d, h.QemuImgPath, "resize", "-f", "raw", raw, fmt.Sprintf("%dM", disk.SizeMB))
+				res, err := h.Exec.Run(ctx, d, h.QemuImgPath, "resize", "-f", "raw", raw, fmt.Sprintf("%dM", disk.SizeMB))
 				if err != nil {
 					return paths, fmt.Errorf("unable to resize disk %d image: %w; %s", i, err, res.Stderr)
 				}
@@ -98,7 +96,7 @@ func (h *VFKitHypervisor) PrepareDisks(ctx context.Context, conf VMConfig) (VMPa
 
 	// If an OVMFVarsSrc is provided, copy it as the starting point.
 	if conf.OVMFVarsSrc != "" {
-		if _, err := cmd.CopyFile(conf.OVMFVarsSrc, paths.OVMFVars); err != nil {
+		if _, err := h.Exec.CopyFile(ctx, conf.OVMFVarsSrc, paths.OVMFVars); err != nil {
 			return paths, fmt.Errorf("unable to copy EFI variable store: %w", err)
 		}
 	}
@@ -115,8 +113,8 @@ type imageInfo struct {
 }
 
 // detectImageFormat returns the disk image format (e.g. "raw", "qcow2") using qemu-img info.
-func (h *VFKitHypervisor) detectImageFormat(logDir, src string) (string, error) {
-	res, err := cmd.Run(logDir, h.QemuImgPath, "info", "--output=json", src)
+func (h *VFKitHypervisor) detectImageFormat(ctx context.Context, logDir, src string) (string, error) {
+	res, err := h.Exec.Run(ctx, logDir, h.QemuImgPath, "info", "--output=json", src)
 	if err != nil {
 		return "", fmt.Errorf("qemu-img info failed: %w; %s", err, res.Stderr)
 	}
@@ -129,7 +127,7 @@ func (h *VFKitHypervisor) detectImageFormat(logDir, src string) (string, error) 
 
 // convertToRaw converts a disk image to raw format using qemu-img, or copies it if already raw.
 func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst string) error {
-	format, err := h.detectImageFormat(logDir, src)
+	format, err := h.detectImageFormat(ctx, logDir, src)
 	if err != nil {
 		return err
 	}
@@ -137,12 +135,12 @@ func (h *VFKitHypervisor) convertToRaw(ctx context.Context, logDir, src, dst str
 	switch format {
 	case "raw":
 		tflog.Debug(ctx, "Source image is already raw, copying instead of converting", map[string]any{"src": src, "dst": dst})
-		if _, err := cmd.CopyFile(src, dst); err != nil {
+		if _, err := h.Exec.CopyFile(ctx, src, dst); err != nil {
 			return fmt.Errorf("failed to copy raw image: %w", err)
 		}
 		return nil
 	case "qcow2":
-		res, err := cmd.Run(logDir, h.QemuImgPath, "convert", "-f", "qcow2", "-O", "raw", src, dst)
+		res, err := h.Exec.Run(ctx, logDir, h.QemuImgPath, "convert", "-f", "qcow2", "-O", "raw", src, dst)
 		if err != nil {
 			return fmt.Errorf("qemu-img convert failed: %w; %s", err, res.Stderr)
 		}
@@ -171,20 +169,20 @@ func (h *VFKitHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (stri
 
 	tflog.Debug(ctx, "Starting gvproxy (self-invoke)", map[string]any{"args": args})
 
-	res, err := cmd.RunDetached(d, os.Args[0], args...)
+	res, err := h.Exec.RunDetached(ctx, d, h.Exec.SelfPath(), args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to start gvproxy: %w; %s", err, res.Stderr)
 	}
 
 	// Write PID file in case gvproxy hasn't written it yet.
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+	if err := h.Exec.WriteFile(ctx, pidFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write gvproxy PID file: %w", err)
 	}
 
 	// Poll for the socket file to appear.
 	deadline := time.Now().Add(gvproxyPollTimeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(socketPath); err == nil {
+		if _, err := h.Exec.Stat(ctx, socketPath); err == nil {
 			tflog.Debug(ctx, "gvproxy socket ready", map[string]any{"path": socketPath})
 			return socketPath, nil
 		}
@@ -197,9 +195,9 @@ func (h *VFKitHypervisor) startGvproxy(ctx context.Context, conf VMConfig) (stri
 // stopGvproxy sends SIGTERM to the gvproxy process.
 func (h *VFKitHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
 	pidFile := filepath.Join(resourceDir, "gvproxy.pid")
-	pidBytes, err := os.ReadFile(pidFile)
+	pidBytes, err := h.Exec.ReadFile(ctx, pidFile)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if !exec.IsNotExist(err) {
 			tflog.Debug(ctx, "Failed to read gvproxy PID file", map[string]any{"error": err})
 		}
 		return
@@ -211,12 +209,7 @@ func (h *VFKitHypervisor) stopGvproxy(ctx context.Context, resourceDir string) {
 		return
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := h.Exec.Kill(ctx, pid, syscall.SIGTERM); err != nil {
 		tflog.Debug(ctx, "SIGTERM to gvproxy failed (may already be stopped)", map[string]any{"error": err})
 	}
 }
@@ -299,8 +292,9 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 	}
 	devices = append(devices, rngDev)
 
-	// Serial console: always use PTY mode. A PTY tailer (launched separately
-	// or in-process for installations) reads the PTY and writes to the log file.
+	// Serial console: always use PTY mode. A PTY tailer (launched separately,
+	// or by Start itself for installations) reads the PTY and writes to the
+	// log file.
 	serialDev, err := vfconfig.VirtioSerialNewPty()
 	if err != nil {
 		return fmt.Errorf("configure serial: %w", err)
@@ -325,55 +319,60 @@ func (h *VFKitHypervisor) Start(ctx context.Context, conf VMConfig, paths VMPath
 		debugScript = fmt.Sprintf("#!/usr/bin/env bash\n\nset -eu;\n\n#### VFKIT ARGS: %v\n\n%s %s\n",
 			args, h.VfkitPath, strings.Join(args, " "))
 	}
-	if err := os.WriteFile(paths.DebugScript, []byte(debugScript), 0o755); err != nil {
+	if err := h.Exec.WriteFile(ctx, paths.DebugScript, []byte(debugScript), 0o755); err != nil {
 		tflog.Debug(ctx, "Failed to write start VM script", map[string]any{"error": err})
 	}
 
 	// Launch vfkit.
 	if conf.IsInstallation {
-		resultChan := cmd.RunBG(d, h.VfkitPath, args...)
+		resultChan := h.Exec.RunBG(ctx, d, h.VfkitPath, args...)
 
 		// Poll for PTY path in the vfkit stderr log.
-		ptyDevPath, err := waitForPtyPath(d)
+		ptyDevPath, err := waitForPtyPath(ctx, h.Exec, d)
 		if err != nil {
 			tflog.Warn(ctx, "Could not determine serial PTY path for installation", map[string]any{"error": err})
 		}
 
-		// Start in-process tailer goroutine if we have both a PTY and an output path.
-		tailerCtx, tailerCancel := context.WithCancel(ctx)
-		tailerDone := make(chan struct{})
+		// Launch the PTY tailer daemon (self-invocation, same -socket-tailer
+		// mode used for running VMs) if we have both a PTY and an output path.
+		tailerPID := 0
 		if err == nil && conf.SerialToFile != "" {
-			go func() {
-				defer close(tailerDone)
-				if tErr := runPtyToFile(tailerCtx, ptyDevPath, conf.SerialToFile); tErr != nil {
-					tflog.Warn(ctx, "PTY tailer error during installation", map[string]any{"error": tErr})
-				}
-			}()
-		} else {
-			close(tailerDone)
+			res, tErr := h.Exec.RunDetached(ctx, d, h.Exec.SelfPath(),
+				"-socket-tailer", "-st.pty", ptyDevPath, "-st.out", conf.SerialToFile)
+			if tErr != nil {
+				tflog.Warn(ctx, "Failed to start PTY tailer for installation", map[string]any{"error": tErr})
+			} else {
+				tailerPID = res.PID
+			}
 		}
 
 		// Wait for vfkit to complete.
 		result := <-resultChan
-		tailerCancel()
-		<-tailerDone
+
+		// The tailer normally exits on its own once the PTY closes; SIGTERM it
+		// so it never outlives the installation.
+		if tailerPID != 0 {
+			if kErr := h.Exec.Kill(ctx, tailerPID, syscall.SIGTERM); kErr != nil {
+				tflog.Debug(ctx, "SIGTERM to installation PTY tailer failed (may have already exited)", map[string]any{"error": kErr})
+			}
+		}
 
 		if result.Error != nil {
 			return fmt.Errorf("failed to run vfkit VM for installing EVE-OS: %w; %s", result.Error, result.Stderr)
 		}
 	} else {
-		res, err := cmd.RunDetached(d, h.VfkitPath, args...)
+		res, err := h.Exec.RunDetached(ctx, d, h.VfkitPath, args...)
 		if err != nil {
 			return fmt.Errorf("failed to start vfkit VM: %w; %s", err, res.Stderr)
 		}
 		// Write vfkit PID file.
-		if err := os.WriteFile(paths.PIDFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
+		if err := h.Exec.WriteFile(ctx, paths.PIDFile, []byte(strconv.Itoa(res.PID)), 0o600); err != nil {
 			return fmt.Errorf("failed to write vfkit PID file: %w", err)
 		}
 		// PTY mode: extract the PTY path from vfkit's stderr log so the tailer can connect.
-		if ptyPath, err := parsePtyPath(res.Logs.Stderr); err == nil {
+		if ptyPath, err := parsePtyPath(ctx, h.Exec, res.Logs.Stderr); err == nil {
 			ptyFile := filepath.Join(d, "serial.pty")
-			if err := os.WriteFile(ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
+			if err := h.Exec.WriteFile(ctx, ptyFile, []byte(ptyPath+"\n"), 0o600); err != nil {
 				tflog.Warn(ctx, "Failed to write serial PTY path file", map[string]any{"error": err})
 			}
 			tflog.Info(ctx, "Serial console PTY available", map[string]any{"pty": ptyPath, "connect": fmt.Sprintf("screen %s", ptyPath)})
@@ -391,9 +390,9 @@ func (h *VFKitHypervisor) ApplyCPUPins(_ context.Context, _ VMConfig) error {
 
 func (h *VFKitHypervisor) Status(ctx context.Context, resourceDir string) (bool, error) {
 	pidFile := filepath.Join(resourceDir, "vfkit.pid")
-	pidBytes, err := os.ReadFile(pidFile)
+	pidBytes, err := h.Exec.ReadFile(ctx, pidFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if exec.IsNotExist(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("can't read PID file: %w", err)
@@ -405,24 +404,14 @@ func (h *VFKitHypervisor) Status(ctx context.Context, resourceDir string) (bool,
 		return false, fmt.Errorf("invalid PID in file: %w", err)
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false, nil
-	}
-
-	// Signal 0 checks if process exists without sending a signal.
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return false, nil
-	}
-
-	return true, nil
+	return h.Exec.IsRunning(ctx, pid, "")
 }
 
 func (h *VFKitHypervisor) Stop(ctx context.Context, resourceDir string) error {
 	pidFile := filepath.Join(resourceDir, "vfkit.pid")
-	pidBytes, err := os.ReadFile(pidFile)
+	pidBytes, err := h.Exec.ReadFile(ctx, pidFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if exec.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("can't read PID file: %w", err)
@@ -434,12 +423,7 @@ func (h *VFKitHypervisor) Stop(ctx context.Context, resourceDir string) error {
 		return fmt.Errorf("invalid PID: %w", err)
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return nil
-	}
-
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := h.Exec.Kill(ctx, pid, syscall.SIGTERM); err != nil {
 		tflog.Debug(ctx, "SIGTERM to vfkit failed (may already be stopped)", map[string]any{"error": err})
 	}
 
@@ -452,18 +436,16 @@ func (h *VFKitHypervisor) Stop(ctx context.Context, resourceDir string) error {
 	return nil
 }
 
-// parsePtyPath reads a vfkit stderr log file and extracts the PTY device path
-// from the line: level=info msg="Using PTY (pty path: /dev/ttys003)"
-func parsePtyPath(logFile string) (string, error) {
-	f, err := os.Open(logFile)
+// parsePtyPath reads a vfkit stderr log file (a path on the target) and
+// extracts the PTY device path from the line:
+// level=info msg="Using PTY (pty path: /dev/ttys003)"
+func parsePtyPath(ctx context.Context, ex exec.Executor, logFile string) (string, error) {
+	data, err := ex.ReadFile(ctx, logFile)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range strings.Split(string(data), "\n") {
 		const marker = "pty path: "
 		idx := strings.Index(line, marker)
 		if idx < 0 {
@@ -481,7 +463,7 @@ func parsePtyPath(logFile string) (string, error) {
 
 // waitForPtyPath polls for a vfkit stderr log file in the resource directory
 // and extracts the PTY device path from it.
-func waitForPtyPath(resourceDir string) (string, error) {
+func waitForPtyPath(ctx context.Context, ex exec.Executor, resourceDir string) (string, error) {
 	const (
 		pollInterval = 200 * time.Millisecond
 		pollTimeout  = 10 * time.Second
@@ -489,9 +471,12 @@ func waitForPtyPath(resourceDir string) (string, error) {
 
 	deadline := time.Now().Add(pollTimeout)
 	for time.Now().Before(deadline) {
-		matches, _ := filepath.Glob(filepath.Join(resourceDir, "*_vfkit_stderr.log"))
-		for _, logFile := range matches {
-			if ptyPath, err := parsePtyPath(logFile); err == nil {
+		entries, _ := ex.ReadDir(ctx, resourceDir)
+		for _, entry := range entries {
+			if ok, _ := filepath.Match("*_vfkit_stderr.log", entry.Name()); !ok {
+				continue
+			}
+			if ptyPath, err := parsePtyPath(ctx, ex, filepath.Join(resourceDir, entry.Name())); err == nil {
 				return ptyPath, nil
 			}
 		}
@@ -499,23 +484,6 @@ func waitForPtyPath(resourceDir string) (string, error) {
 	}
 
 	return "", fmt.Errorf("PTY path not found in vfkit stderr logs within %s", pollTimeout)
-}
-
-// runPtyToFile opens a PTY device and writes timestamped lines to an output file.
-func runPtyToFile(ctx context.Context, ptyDevPath, outPath string) error {
-	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to open output file %s: %w", outPath, err)
-	}
-	defer outFile.Close()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	tailer := socket.NewTailer(outFile, logger)
-	defer tailer.Close()
-
-	return tailer.RunPty(ctx, ptyDevPath)
 }
 
 // parseMemoryToMiB converts memory strings like "4G", "4096M", "4096" to MiB.

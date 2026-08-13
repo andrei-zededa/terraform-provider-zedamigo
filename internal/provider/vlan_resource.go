@@ -135,6 +135,7 @@ func (r *VLAN) Configure(ctx context.Context, req resource.ConfigureRequest, res
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_vlan", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "VLAN resource configure debugging", traceData)

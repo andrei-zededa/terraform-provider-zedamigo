@@ -155,6 +155,7 @@ func (r *Bridge) Configure(ctx context.Context, req resource.ConfigureRequest, r
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_bridge", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "Bridge resource configure debugging", traceData)

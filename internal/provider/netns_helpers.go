@@ -3,9 +3,29 @@
 package provider
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
+
+// requireLinuxTarget adds an error diagnostic when the target platform can't
+// run the Linux-only networking resources: they depend on the `ip` command
+// (zaConf.IP is left empty on macOS targets) and on Linux-only daemon
+// subcommands of the provider binary. Called from the Configure method of each
+// such resource so that using one against e.g. a macOS target fails with a
+// clear message instead of a cryptic exec error at apply time.
+func requireLinuxTarget(conf *ZedAmigoProviderConfig, resourceName string, diags *diag.Diagnostics) {
+	if conf.TargetOS == "linux" {
+		return
+	}
+	diags.AddError(
+		fmt.Sprintf("%s requires a Linux target.", resourceName),
+		fmt.Sprintf("The %s resource depends on the Linux `ip` command and is not supported on %s/%s targets.",
+			resourceName, conf.TargetOS, conf.TargetArch),
+	)
+}
 
 // linkFlagsRegex captures the flags section of an `ip link show` line, e.g.
 // the "BROADCAST,MULTICAST,UP,LOWER_UP" part of

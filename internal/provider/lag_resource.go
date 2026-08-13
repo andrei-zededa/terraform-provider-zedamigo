@@ -254,6 +254,7 @@ func (r *LAG) Configure(ctx context.Context, req resource.ConfigureRequest, resp
 	}
 
 	r.providerConf = conf
+	requireLinuxTarget(conf, "zedamigo_lag", &resp.Diagnostics)
 
 	traceData := map[string]any{"providerConf": spew.Sprint(r.providerConf)}
 	tflog.Trace(ctx, "LAG resource configure debugging", traceData)
