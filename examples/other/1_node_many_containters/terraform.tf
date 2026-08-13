@@ -19,15 +19,6 @@ terraform {
 
 provider "zedamigo" {
   use_sudo = true
-
-  target = "172.16.2.221"
-
-  ssh {
-    user               = "support_lab"
-    use_agent          = true
-    proxy_jump         = "root@localhost:11022"
-    remote_binary_path = "/home/support_lab/.terraform.d/plugins/localhost/andrei-zededa/zedamigo/0.0.0-dev.branchfixdarwinsshlinux+commitbe34e17/linux_amd64/terraform-provider-zedamigo_v0.0.0-dev.branchfixdarwinsshlinux+commitbe34e17"
-  }
 }
 
 variable "ZEDEDA_CLOUD_URL" {
