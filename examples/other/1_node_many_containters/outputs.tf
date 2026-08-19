@@ -14,7 +14,8 @@ output "WORKLOAD_BREAKDOWN" {
   description = "Per-role breakdown of the resource budget"
   value = {
     for role, spec in local.WORKLOAD_ROLES : role => {
-      image      = "${spec.image}:${local.CONTAINER_IMAGE_TAGS[spec.image]}"
+      # One image version per replica, see `image_tags` in `workloads.tf`.
+      images     = [for t in spec.image_tags : "${spec.image}:${t}"]
       replicas   = spec.replicas
       vcpus      = spec.replicas * spec.cpus
       memory_mb  = spec.replicas * spec.memory_mb
@@ -75,15 +76,11 @@ output "EXTRA_MGMT_PORTS" {
 }
 
 output "EDGE_NODE_QMP_SOCKET" {
-  description = "Path, ON THE PROVIDER TARGET, of the QMP socket of the edge-node VM — the one the DISABLE_SLIRP_NIC barrier talks to"
+  description = "Path, ON THE PROVIDER TARGET, of the QMP socket of the edge-node VM, for poking the VM by hand (e.g. `set_link` to simulate a carrier loss)"
   value       = local.QMP_SOCKET_PATH
 }
 
-output "SLIRP_NIC_DISABLED" {
-  description = "Outcome of the barrier which waits for the edge-node to report in to Zedcloud and then takes the link of the QEMU user-mode NIC down"
-  value = {
-    attempts = zedamigo_wait_until.DISABLE_SLIRP_NIC.attempts
-    elapsed  = zedamigo_wait_until.DISABLE_SLIRP_NIC.elapsed
-    result   = trimspace(zedamigo_wait_until.DISABLE_SLIRP_NIC.stdout)
-  }
+output "CONTAINER_IMAGE_CATALOG" {
+  description = "The 27 distinct container images the edge-node downloads — the unique-blob volume behind the downloader crash this example reproduces"
+  value       = sort([for k in local.CONTAINER_IMAGE_SET : k])
 }

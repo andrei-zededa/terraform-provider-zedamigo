@@ -2,7 +2,7 @@
 #### `workloads.tf`, so 27 of them.
 ####
 #### Having one edge-app definition *per replica* rather than one per role is
-#### deliberate, for two reasons:
+#### deliberate, for three reasons:
 ####
 ####   1. The RAM of an edge-app-instance can only come from the manifest
 ####      `resources`: `vminfo` of an edge-app-instance can override `cpus`, but
@@ -13,6 +13,10 @@
 ####      volume-instance per edge-node. Since all 27 replicas land on the same
 ####      edge-node every replica needs its own label, and the label is part of
 ####      the manifest.
+####   3. Every replica pins its own image *version* (`image_tag` in
+####      `workloads.tf`), which is what makes the edge-node download 27
+####      distinct images — the precondition for the downloader crash this
+####      example reproduces. The image reference is part of the manifest.
 ####
 #### Each manifest declares three drives:
 ####
@@ -41,11 +45,11 @@ resource "zedcloud_application" "CONTAINER_APP_DEFS" {
   networks    = 1
   origin_type = "ORIGIN_LOCAL"
 
-  user_defined_version = local.CONTAINER_IMAGE_TAGS[each.value.image]
+  user_defined_version = each.value.image_tag
 
   manifest {
     ac_kind             = "PodManifest"
-    ac_version          = local.CONTAINER_IMAGE_TAGS[each.value.image]
+    ac_version          = each.value.image_tag
     app_type            = "APP_TYPE_CONTAINER"
     cpu_pinning_enabled = false
     deployment_type     = "DEPLOYMENT_TYPE_STAND_ALONE"
@@ -102,8 +106,8 @@ resource "zedcloud_application" "CONTAINER_APP_DEFS" {
       cleartext   = false
       ignorepurge = false
       imageformat = "CONTAINER"
-      imageid     = local.CONTAINER_IMAGES[each.value.image].id
-      imagename   = local.CONTAINER_IMAGES[each.value.image].name
+      imageid     = local.CONTAINER_IMAGES["${each.value.image}:${each.value.image_tag}"].id
+      imagename   = local.CONTAINER_IMAGES["${each.value.image}:${each.value.image_tag}"].name
       maxsize     = "0"
       mountpath   = "/"
       preserve    = false

@@ -20,6 +20,16 @@
 ####                    does have a volume label and is therefore backed by an
 ####                    explicit `zedcloud_volume_instance`.
 ####
+#### `image_tags` gives every replica of a role its own image *version*, one
+#### list entry per replica. This is what makes the example reproduce the
+#### EVE-OS downloader crash (see the README): the crash needs the
+#### downloader to accumulate ~250+ unique blob URLs in one boot session, and
+#### 27 replicas of 5 identical images dedup to only ~60 unique blobs. Versions
+#### of the same repo released far apart share almost no layers, so 27 distinct
+#### tags resolve to ~307 unique blobs (verified against Docker Hub, 2026-08) —
+#### and it matches the scenario where many ### versions/builds of the same
+#### product family downloaded in one session.
+####
 #### `env` is the environment of the container, the equivalent of the `--env`
 #### flags of a `docker run`. It is rendered into a cloud-init `runcmd` list and
 #### attached to the edge-app definition as its custom config, see `edge_apps.tf`.
@@ -47,37 +57,46 @@ resource "random_password" "postgres_superuser" {
 
 locals {
   WORKLOAD_ROLES = {
-    kafka_broker = {
+    # These two roles ran `apache/kafka` when this example pulled from Docker
+    # Hub. This lab cannot reach Docker Hub's token service (see
+    # `datastores.tf`), and Kafka has no anonymously-pullable home on the
+    # registries which *are* reachable, so the pipeline roles run Logstash
+    # instead — which also keeps the whole catalog inside the Elastic product
+    # family. The default Logstash pipeline (beats in, stdout out) comes up
+    # with no configuration; only the JVM heap is pinned per replica further
+    # down, like Elasticsearch's.
+    logstash_pipeline = {
       replicas     = 3
-      image        = "kafka"
+      image        = "logstash"
+      image_tags   = ["8.17.4", "8.15.5", "8.14.3"]
       cpus         = 2
       memory_mb    = 4096
       persist_mb   = 512
       persist_path = "/mnt/persist"
       data_mb      = 3072
       data_path    = "/mnt/data"
-      app_port     = 9092
-      # This image comes up with no configuration at all.
-      env = {}
+      app_port     = 5044
+      env          = {}
     }
 
-    kafka_controller = {
+    logstash_agent = {
       replicas     = 3
-      image        = "kafka"
+      image        = "logstash"
+      image_tags   = ["8.13.4", "8.11.4", "7.17.10"]
       cpus         = 1
       memory_mb    = 1024
       persist_mb   = 256
       persist_path = "/mnt/persist"
       data_mb      = 256
       data_path    = "/mnt/data"
-      app_port     = 9093
-      # This image comes up with no configuration at all.
-      env = {}
+      app_port     = 5044
+      env          = {}
     }
 
     elasticsearch_master = {
       replicas     = 3
       image        = "elasticsearch"
+      image_tags   = ["8.17.4", "8.15.5", "8.14.3"]
       cpus         = 1
       memory_mb    = 2048
       persist_mb   = 256
@@ -100,6 +119,7 @@ locals {
     elasticsearch_data = {
       replicas     = 3
       image        = "elasticsearch"
+      image_tags   = ["8.13.4", "8.12.2", "8.11.4"]
       cpus         = 2
       memory_mb    = 6144
       persist_mb   = 512
@@ -122,6 +142,7 @@ locals {
     elasticsearch_ingest = {
       replicas     = 1
       image        = "elasticsearch"
+      image_tags   = ["7.17.10"]
       cpus         = 2
       memory_mb    = 4096
       persist_mb   = 256
@@ -144,6 +165,7 @@ locals {
     kibana = {
       replicas     = 2
       image        = "kibana"
+      image_tags   = ["8.17.4", "8.15.5"]
       cpus         = 2
       memory_mb    = 2048
       persist_mb   = 256
@@ -158,6 +180,7 @@ locals {
     redis_cache = {
       replicas     = 4
       image        = "redis"
+      image_tags   = ["7.4", "7.2", "7.0", "6.2"]
       cpus         = 1
       memory_mb    = 1024
       persist_mb   = 256
@@ -172,6 +195,7 @@ locals {
     redis_sentinel = {
       replicas     = 2
       image        = "redis"
+      image_tags   = ["6.0", "5.0"]
       cpus         = 1
       memory_mb    = 512
       persist_mb   = 128
@@ -186,6 +210,7 @@ locals {
     postgres_primary = {
       replicas     = 2
       image        = "postgres"
+      image_tags   = ["17", "16"]
       cpus         = 2
       memory_mb    = 3072
       persist_mb   = 1024
@@ -208,6 +233,7 @@ locals {
     postgres_replica = {
       replicas     = 4
       image        = "postgres"
+      image_tags   = ["15", "14", "13", "12"]
       cpus         = 1
       memory_mb    = 768
       persist_mb   = 384
@@ -240,6 +266,9 @@ locals {
       "${role}_${replica}" => merge(spec, {
         role    = role
         replica = replica
+        # Every replica pins its own image version, see the comment on
+        # `image_tags` at the top of this file.
+        image_tag = spec.image_tags[replica - 1]
       })
     }
   ]...)
@@ -262,14 +291,18 @@ locals {
       node_port = local.WORKLOAD_NODE_PORT_BASE + idx
 
       #### The only part of the container environment which is not static per
-      #### role: Elasticsearch sizes its JVM heap from `ES_JAVA_OPTS`, and the
-      #### usual rule of thumb is half of the RAM of the node. Without it the JVM
-      #### picks a heap from the *edge-node* RAM (256GB) rather than from the
-      #### limit of the app-instance and gets OOM-killed.
+      #### role: Elasticsearch and Logstash size their JVM heap from
+      #### `ES_JAVA_OPTS` / `LS_JAVA_OPTS`, and the usual rule of thumb is half
+      #### of the RAM of the node. Without it the JVM picks a heap from the
+      #### *edge-node* RAM (256GB) rather than from the limit of the
+      #### app-instance and gets OOM-killed.
       env = merge(
         local.WORKLOADS_WITHOUT_PORTS[name].env,
         local.WORKLOADS_WITHOUT_PORTS[name].image == "elasticsearch"
         ? { ES_JAVA_OPTS = "-Xms${floor(local.WORKLOADS_WITHOUT_PORTS[name].memory_mb / 2)}m -Xmx${floor(local.WORKLOADS_WITHOUT_PORTS[name].memory_mb / 2)}m" }
+        : {},
+        local.WORKLOADS_WITHOUT_PORTS[name].image == "logstash"
+        ? { LS_JAVA_OPTS = "-Xms${floor(local.WORKLOADS_WITHOUT_PORTS[name].memory_mb / 2)}m -Xmx${floor(local.WORKLOADS_WITHOUT_PORTS[name].memory_mb / 2)}m" }
         : {},
       )
     })
@@ -322,6 +355,28 @@ check "resource_budget" {
        memory             = ${local.RESOURCE_BUDGET.memory_mb} MB
        persistent volumes = ${local.RESOURCE_BUDGET.persist_mb} MB
        dedicated volumes  = ${local.RESOURCE_BUDGET.dedicated_mb} MB
+     EOF
+  }
+
+  assert {
+    condition = alltrue([
+      for role, spec in local.WORKLOAD_ROLES :
+      length(spec.image_tags) == spec.replicas
+    ])
+
+    error_message = "Every role of `local.WORKLOAD_ROLES` must have exactly one `image_tags` entry per replica."
+  }
+
+  assert {
+    condition = length(local.CONTAINER_IMAGE_SET) == local.RESOURCE_BUDGET.app_instances
+
+    error_message = <<-EOF
+     The workload catalog no longer gives every replica its own image version:
+     only ${length(local.CONTAINER_IMAGE_SET)} distinct `repo:tag` pairs for
+     ${local.RESOURCE_BUDGET.app_instances} app-instances. Reusing a version
+     across replicas dedups its blobs away and the downloader MetricsMap may
+     stay below the 64KB pubsub limit, i.e. the crash this example exists to
+     reproduce may not happen. See the README.
      EOF
   }
 }

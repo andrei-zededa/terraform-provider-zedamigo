@@ -77,6 +77,12 @@ resource "zedcloud_edgenode" "ENODE_TEST" {
   tags = {}
 }
 
+resource "zedamigo_host_reservation" "node_resources" {
+  cpus = var.EDGE_NODE_CPUS
+  mem  = var.EDGE_NODE_MEM_GB
+  # devs = []
+}
+
 #### This creates a QCOW2 disk image file which will be used for running the
 #### QEMU VM with EVE-OS. It needs to be large enough for the EVE-OS partitions,
 #### the container images of all the workloads and all of the volumes which the
@@ -90,7 +96,7 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
   name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.0.1-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "17.0.0-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -126,9 +132,10 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL" {
 #### 80 vCPUs and 256GB of RAM, so the host has to be sized accordingly. See the
 #### comment in `terraform.tf` about running this against a remote host.
 resource "zedamigo_edge_node" "ENODE_TEST_VM" {
-  name = "ENODE_TEST_VM_${var.config_suffix}"
-  cpus = var.EDGE_NODE_CPUS
-  mem  = "${var.EDGE_NODE_MEM_GB}G"
+  name     = "ENODE_TEST_VM_${var.config_suffix}"
+  cpus     = zedamigo_host_reservation.node_resources.cpus_reserved_count
+  cpu_pins = zedamigo_host_reservation.node_resources.cpus_reserved
+  mem      = "${zedamigo_host_reservation.node_resources.mem_reserved_total_gb}G"
   # See comment for zedcloud_edgenode.ENODE_TEST.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL.serial_no
   serial_port_server = true
@@ -183,134 +190,16 @@ resource "zedamigo_edge_node" "ENODE_TEST_VM" {
 
 locals {
   # `qmp_socket` is the value of the QEMU `-qmp` argument, e.g.
-  # `unix:/var/lib/zedamigo/edge_nodes/<id>/qmp.socket,server,nowait`. The
-  # script below wants only the socket path out of it.
+  # `unix:/var/lib/zedamigo/edge_nodes/<id>/qmp.socket,server,nowait`. Only the
+  # socket path out of it is exported (`EDGE_NODE_QMP_SOCKET`), for poking the
+  # VM by hand — e.g. a `set_link` to simulate a carrier loss on a NIC.
+  #
+  # An earlier version of this example had a `zedamigo_wait_until` barrier here
+  # which took the link of eth0 — the only port with a path to the controller —
+  # down as soon as the node reported in, to watch EVE-OS fail over across the
+  # nine dead-end ports. That barrier is gone on purpose: this example now
+  # reproduces the downloader crash (see the README), and for that the node has
+  # to stay online and *download all 27 images*. Cutting the uplink before the
+  # pulls start is exactly how the crash does NOT happen.
   QMP_SOCKET_PATH = trimsuffix(trimprefix(zedamigo_edge_node.ENODE_TEST_VM.qmp_socket, "unix:"), ",server,nowait")
-}
-
-#### Barrier: wait until Zedcloud reports that the edge-node has actually come
-#### up — `runState` BOOTING or ONLINE, i.e. no longer merely PROVISIONED or
-#### REGISTERED — and then take the link of the QEMU user-mode NIC (eth0) down
-#### over QMP, leaving the node with only the nine dead-end ports of
-#### `local.EXTRA_MGMT_PORTS`.
-####
-#### The script runs ON THE PROVIDER TARGET, which is what makes this work when
-#### `target` is a remote host: the QMP socket only exists next to the QEMU
-#### process. It needs `curl`, `jq` and `socat` there.
-####
-#### NOTE: `var.ZEDEDA_CLOUD_TOKEN` is interpolated into the script, so it ends
-#### up both in the Terraform state and in the script file which the provider
-#### writes under `<lib_path>/wait_until/<id>/` on the target. That is the only
-#### way to get a credential into a `zedamigo_wait_until` probe today — use a
-#### token you are willing to have at rest in those two places.
-resource "zedamigo_wait_until" "DISABLE_SLIRP_NIC" {
-  triggers = {
-    # Referencing both ids orders this after the VM (whose QMP socket it talks
-    # to) and after the Zedcloud edge-node (whose state it polls), and re-runs
-    # the barrier if either is recreated.
-    node_vm_id = zedamigo_edge_node.ENODE_TEST_VM.id
-    node_id    = zedcloud_edgenode.ENODE_TEST.id
-  }
-
-  # Generous: this covers the whole of the EVE-OS boot and onboarding, which on
-  # a node this size is not quick.
-  timeout  = "45m"
-  interval = "20s"
-  # Backstop only — both the curl and the socat below are self-bounding.
-  attempt_timeout = "60s"
-
-  script = <<-EOT
-    set -u
-
-    # `zedamigo_wait_until` injects no PATH and a non-interactive remote shell
-    # may hand this script a minimal one, so *add to* whatever PATH we were
-    # given. Do not replace it: on a target which does not populate the usual
-    # directories at all — NixOS, where the tools live in
-    # /run/current-system/sw/bin — replacing PATH is exactly how you lose curl
-    # on a host where `command -v curl` works fine in a login shell. The extra
-    # directories are appended only if they exist, so this stays a no-op
-    # everywhere else.
-    PATH="$${PATH:+$PATH:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    for d in /run/wrappers/bin /run/current-system/sw/bin \
-             /nix/var/nix/profiles/default/bin \
-             "$${HOME:-/nonexistent}/.nix-profile/bin" /opt/homebrew/bin; do
-      if [ -d "$d" ]; then PATH="$PATH:$d"; fi
-    done
-    export PATH
-
-    CLUSTER='${var.ZEDEDA_CLOUD_URL}'
-    TOKEN='${var.ZEDEDA_CLOUD_TOKEN}'
-    NODE_ID='${zedcloud_edgenode.ENODE_TEST.id}'
-    NODE_NAME='${zedcloud_edgenode.ENODE_TEST.name}'
-    QMP_SOCKET='${local.QMP_SOCKET_PATH}'
-
-    # A missing tool is not recoverable by retrying, but the resource has no
-    # notion of a fatal exit, so it will be reported once per attempt until the
-    # overall timeout expires.
-    for tool in curl jq socat; do
-      if ! command -v "$tool" >/dev/null 2>&1; then
-        echo "required tool not found on the provider target: $tool (PATH=$PATH)" >&2
-        exit 1
-      fi
-    done
-
-    #### 1. Has the node reported in to Zedcloud?
-    ####
-    #### `runState` is what the Zedcloud UI shows in the edge-node Status
-    #### column. An edge-node which has been created and onboarded but has not
-    #### reported anything yet sits in PROVISIONED (or REGISTERED, before it is
-    #### activated); BOOTING is the first state that means EVE-OS is running
-    #### and talking to the controller.
-    ####
-    #### `/v1/devices/status-config` is a list endpoint, so filter it by name
-    #### and then pick the record out by id — the id is the unambiguous key.
-    STATE="$(curl -fsS --max-time 20 -G \
-      -H "Authorization: Bearer $TOKEN" \
-      -H 'Accept: application/json' \
-      --data-urlencode "filter.deviceName=$NODE_NAME" \
-      "https://$CLUSTER/api/v1/devices/status-config" \
-      | jq -r --arg id "$NODE_ID" '.list[]? | select(.id == $id) | .runState')"
-
-    if [ -z "$STATE" ]; then
-      echo "no status-config record for $NODE_NAME ($NODE_ID) yet" >&2
-      exit 1
-    fi
-
-    case "$STATE" in
-      RUN_STATE_BOOTING | RUN_STATE_ONLINE)
-        echo "edge-node is $STATE"
-        ;;
-      *)
-        echo "edge-node is still $STATE" >&2
-        exit 1
-        ;;
-    esac
-
-    # Wait 2 mins (and a bit) so that the node has time to getit's new config.
-    sleep 150;
-
-    #### 2. Disable the QEMU user-mode NIC.
-    ####
-    #### `usernet0` is the id the provider gives the default nic0 netdev, and
-    #### `set_link` on a netdev propagates to the NIC it is peered with, so
-    #### this is a carrier loss on eth0 as far as EVE-OS is concerned. The NIC
-    #### is not unplugged: the interface stays, the port numbering of the guest
-    #### does not shift, and the same command with `"up":true` puts it back.
-    ####
-    #### QMP accepts nothing before the capabilities handshake, so both
-    #### commands go down the same connection. `-t 5` keeps socat reading for
-    #### five seconds after it has written them; re-running it is harmless.
-    QMP_OUT="$(printf '%s\n%s\n' \
-      '{"execute":"qmp_capabilities"}' \
-      '{"execute":"set_link","arguments":{"name":"usernet0","up":false}}' \
-      | socat -t 5 - "UNIX-CONNECT:$QMP_SOCKET")"
-
-    # The greeting, then one `{"return": {}}` per command.
-    if [ "$(printf '%s\n' "$QMP_OUT" | grep -c '"return"')" -lt 2 ]; then
-      echo "unexpected QMP reply from $QMP_SOCKET: $QMP_OUT" >&2
-      exit 1
-    fi
-
-    echo "set_link usernet0 down: $QMP_OUT"
-  EOT
 }

@@ -77,7 +77,7 @@ resource "zedcloud_edgenode" "ENODE_001" {
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH_PF"
+    ztype      = "IO_TYPE_ETH"
     tags       = {}
   }
 
@@ -136,7 +136,7 @@ resource "zedcloud_edgenode" "ENODE_002" {
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH_PF"
+    ztype      = "IO_TYPE_ETH"
     tags       = {}
   }
 
@@ -195,7 +195,7 @@ resource "zedcloud_edgenode" "ENODE_003" {
     net_dhcp   = "NETWORK_DHCP_TYPE_CLIENT"
     cost       = 0
     netname    = zedcloud_network.edge_node_as_dhcp_client.name
-    ztype      = "IO_TYPE_ETH_PF"
+    ztype      = "IO_TYPE_ETH"
     tags       = {}
   }
 
@@ -234,7 +234,7 @@ resource "zedamigo_eve_installer" "eve_os_installer" {
 resource "zedamigo_host_reservation" "ENODE01_resources" {
   cpus = 6
   mem  = 16 # GB
-  devs = ["/dev/vg_sdb/reserve1"]
+  devs = ["/dev/vg_nvme0/reserve1"]
 }
 
 #### This will start a QEMU VM with the EVE-OS installer ISO previously
@@ -264,7 +264,7 @@ resource "zedamigo_installed_edge_node" "ENODE_001" {
 resource "zedamigo_host_reservation" "ENODE02_resources" {
   cpus = 6
   mem  = 16 # GB
-  devs = ["/dev/vg_sdc/reserve1"]
+  devs = ["/dev/vg_nvme1/reserve1"]
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_002" {
@@ -290,9 +290,9 @@ resource "zedamigo_installed_edge_node" "ENODE_002" {
 }
 
 resource "zedamigo_host_reservation" "ENODE03_resources" {
-  cpus = 4
+  cpus = 6
   mem  = 16 # GB
-  devs = ["/dev/vg_sdd/reserve1"]
+  devs = ["/dev/vg_nvme1/reserve2"]
 }
 
 resource "zedamigo_installed_edge_node" "ENODE_003" {

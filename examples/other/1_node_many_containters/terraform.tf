@@ -2,7 +2,7 @@ terraform {
   required_providers {
     zedamigo = {
       source  = "localhost/andrei-zededa/zedamigo"
-      version = ">= 0.12.4"
+      version = ">= 0.13.1"
     }
 
     zedcloud = {

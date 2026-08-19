@@ -32,9 +32,12 @@ locals {
       netmask      = "255.255.255.0"
       # EVE-OS uses the cheapest usable management port first. eth0 — the QEMU
       # user-mode NIC, the only one that actually reaches the controller — is
-      # cost 0, so these are strictly fallbacks and are not used while eth0 is
-      # up. That is what makes `zedamigo_wait_until.DISABLE_SLIRP_NIC` an
-      # interesting thing to do.
+      # cost 0, so these are strictly fallbacks and are not touched while eth0
+      # is up. That matters for the downloader crash this example reproduces
+      # (see the README): with all ports at equal cost EVE-OS would spread
+      # download attempts across nine dead ends, making the 27 image pulls
+      # slow and flaky, and the crashed node was downloading over a single
+      # active uplink anyway.
       cost = n
     }
   }

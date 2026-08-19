@@ -2,10 +2,8 @@
 
 A single QEMU edge-node — **80 vCPUs, 256GB RAM, 1TB disk, 10 management
 ports** — running **27 container edge-app-instances**: a mix of Kafka,
-Elasticsearch, Kibana, Redis and PostgreSQL. Once the node has reported in, a
-barrier resource takes the link of its only working uplink down over QMP and
-leaves it with nine dead-end management ports; see
-[Networking and reachability](#networking-and-reachability).
+Elasticsearch, Kibana, Redis and PostgreSQL, **every replica pinned to its own
+image version** so that the node downloads 27 distinct images.
 
 It combines the two examples it is derived from: the container edge-app / image /
 container-registry-datastore side comes from
@@ -13,10 +11,89 @@ container-registry-datastore side comes from
 local NAT network-instance come from [`1_node_1_vm`](../1_node_1_vm/).
 
 The point of the example is not to bring up a working data platform (see the
-[caveats](#caveats) below) but to put a **known, exact amount of configured load**
-on one edge-node, so that Zedcloud resource views, EVE-OS behaviour with many
-app-instances, `tofu` run times, etc. can be looked at against a number that is
-written down.
+[caveats](#caveats) below). It does two things:
+
+1. puts a **known, exact amount of configured load** on one edge-node, so that
+   Zedcloud resource views, EVE-OS behaviour with many app-instances, `tofu`
+   run times, etc. can be looked at against a number that is written down;
+2. **reproduces the EVE-OS downloader crash** — a mass deployment whose image
+   downloads blow the EVE-OS pubsub message-size limit, upon which EVE-OS
+   reboots the node mid-deployment. See
+   [the section below](#reproducing-the-downloader-crash) for the
+   mechanism and what to watch for.
+
+## Reproducing the downloader crash
+
+The scenario this config reproduces: a node deploying 27 app-instances
+"crashed and rebooted". The root cause (validated against the EVE-OS
+`16.0.1-lts` sources) is a chain in the `pillar` management plane:
+
+1. the `downloader` agent keeps one metrics entry **per unique blob URL** it
+   downloads — every image layer, manifest and config blob is one URL — in
+   `AgentMetrics.URLCounters`, and nothing ever prunes that map within a boot;
+2. every ~10s it publishes the whole map as **one pubsub message**
+   (`downloader/MetricsMap`, key `global`);
+3. the pubsub socket driver caps a message at **65535 bytes**
+   (`pkg/pillar/pubsub/socketdriver/driver.go`) and an oversize publish is
+   `log.Fatalf` (`publish.go`) — i.e. **fatal**;
+4. all pillar agents live in one `zedbox` process, so the fatal kills the whole
+   management plane, and the watchdog then **reboots the node**, recording the
+   reason first.
+
+So the trigger is not the number of app-instances and not resource pressure —
+it is the number of **unique blobs downloaded within one boot session**
+(~250 is where the map crosses the limit, situations when a node had accumulated
+> 300 have been seen). That dictates the two load-bearing choices of this config:
+
+- **27 distinct image tags** (`image_tags` in [`workloads.tf`](./workloads.tf)):
+  EVE-OS dedups blobs by sha256, so 27 replicas of 5 images dedup to ~60 unique
+  blobs and nothing happens — which is exactly why an earlier version of this
+  example did not crash. Versions of the same repo released far apart share
+  almost no layers: the current catalog resolves to **313 unique blobs**
+  (verified against the docker.elastic.co / public.ecr.aws manifests, 2026-08;
+  only 43 of 356 blob references dedup away), which serializes to
+  **~87KB — 134% of the limit**. The limit is crossed at blob ~235, so the
+  fatal hits **mid-download**.
+
+- **the node keeps its uplink**: the earlier `DISABLE_SLIRP_NIC` barrier that
+  cut `eth0` after onboarding is gone — with it, the images never downloaded
+  and the map never grew.
+- **registries the lab can actually reach**: at a previous point in time
+  `auth.docker.io` was not reachable from the lab, so anonymous Docker Hub pulls
+  died at the manifest step and the downloader records nothing — the second
+  silent way this reproduction once failed. Now the catalog pulls from
+  `docker.elastic.co` and `public.ecr.aws/docker/library` instead, both
+  verified end-to-end from the lab; see [`datastores.tf`](./datastores.tf).
+
+What to expect on apply, in order:
+
+1. node onboards, all 27 app-instances land on it, downloads start;
+2. minutes into the download phase (link-speed dependent — ~2 minutes on a
+   fast lab link, where the metrics map went 17KB → 33KB → 50KB in
+   consecutive 30-second samples), the node **reboots on its own**; Zedcloud
+   briefly shows it unreachable, then it comes back;
+3. after the reboot the already-verified blobs are reused from `/persist`, the
+   remaining downloads finish with a near-empty metrics map, and the
+   app-instances come up — the same "crashed, rebooted, then recovered".
+
+To confirm the crash was *the* crash, SSH into EVE-OS
+(`tofu output EDGE_NODE_SSH_PORT`, user `root`) after the reboot:
+
+```
+cat /persist/log/reboot-reason.log
+```
+
+should contain a line like:
+
+```
+Reboot from agent downloader[NNNN] in partition IMGA at EVE version
+16.0.1-lts-kvm-amd64 at <timestamp>: fatal: agent downloader[NNNN]:
+Too large message (NNNNN bytes) sent to downloader/MetricsMap topic MetricsMap key global
+```
+
+To watch it coming, `eve exec pillar` and check the size of the downloader
+metrics map growing while the pulls run; or simply watch
+`/persist/newlog/collect/` for the `Too large message` fatal.
 
 ## The resource budget
 
@@ -27,21 +104,30 @@ written down.
 | RAM | 61 GB |
 | storage | **43 GB** = 10 GB persistent volumes + 33 GB dedicated volumes |
 
-Per role:
+Per role — note that **each replica pins its own image tag** (first replica
+gets the first tag and so on), which is what produces the 27 distinct images
+the [crash reproduction](#reproducing-the-downloader-crash) needs:
 
-| role | replicas | image | vCPU each | RAM each | persistent vol. | dedicated vol. |
-| ------------------------ | -------: | ---------------------- | --------: | -------: | --------------: | -------------: |
-| `kafka_broker`           |        3 | `apache/kafka:3.9.1`   |         2 |   4096MB |           512MB |         3072MB |
-| `kafka_controller`       |        3 | `apache/kafka:3.9.1`   |         1 |   1024MB |           256MB |          256MB |
-| `elasticsearch_master`   |        3 | `elasticsearch:8.17.4` |         1 |   2048MB |           256MB |          256MB |
-| `elasticsearch_data`     |        3 | `elasticsearch:8.17.4` |         2 |   6144MB |           512MB |         2560MB |
-| `elasticsearch_ingest`   |        1 | `elasticsearch:8.17.4` |         2 |   4096MB |           256MB |          512MB |
-| `kibana`                 |        2 | `kibana:8.17.4`        |         2 |   2048MB |           256MB |          128MB |
-| `redis_cache`            |        4 | `redis:7.4-alpine`     |         1 |   1024MB |           256MB |          512MB |
-| `redis_sentinel`         |        2 | `redis:7.4-alpine`     |         1 |    512MB |           128MB |          128MB |
-| `postgres_primary`       |        2 | `postgres:17-alpine`   |         2 |   3072MB |          1024MB |         2048MB |
-| `postgres_replica`       |        4 | `postgres:17-alpine`   |         1 |    768MB |           384MB |         2048MB |
-| **total**                |   **27** |                        |    **38** | **61GB** |       **10GB**  |      **33GB**  |
+| role | replicas | image tags (one per replica) | vCPU each | RAM each | persistent vol. | dedicated vol. |
+| ------------------------ | -------: | ------------------------------------------------ | --------: | -------: | --------------: | -------------: |
+| `logstash_pipeline`      |        3 | `logstash`: 8.17.4, 8.15.5, 8.14.3                |         2 |   4096MB |           512MB |         3072MB |
+| `logstash_agent`         |        3 | `logstash`: 8.13.4, 8.11.4, 7.17.10               |         1 |   1024MB |           256MB |          256MB |
+| `elasticsearch_master`   |        3 | `elasticsearch`: 8.17.4, 8.15.5, 8.14.3           |         1 |   2048MB |           256MB |          256MB |
+| `elasticsearch_data`     |        3 | `elasticsearch`: 8.13.4, 8.12.2, 8.11.4           |         2 |   6144MB |           512MB |         2560MB |
+| `elasticsearch_ingest`   |        1 | `elasticsearch`: 7.17.10                          |         2 |   4096MB |           256MB |          512MB |
+| `kibana`                 |        2 | `kibana`: 8.17.4, 8.15.5                          |         2 |   2048MB |           256MB |          128MB |
+| `redis_cache`            |        4 | `redis`: 7.4, 7.2, 7.0, 6.2                       |         1 |   1024MB |           256MB |          512MB |
+| `redis_sentinel`         |        2 | `redis`: 6.0, 5.0                                 |         1 |    512MB |           128MB |          128MB |
+| `postgres_primary`       |        2 | `postgres`: 17, 16                                |         2 |   3072MB |          1024MB |         2048MB |
+| `postgres_replica`       |        4 | `postgres`: 15, 14, 13, 12                        |         1 |    768MB |           384MB |         2048MB |
+| **total**                |   **27** | 27 distinct tags, ~313 unique blobs               |    **38** | **61GB** |       **10GB**  |      **33GB**  |
+
+Elasticsearch, Kibana and Logstash come from `docker.elastic.co`, Redis and
+PostgreSQL from the `docker/library` mirror on `public.ecr.aws` (Debian-based
+variants, not `-alpine`: more layers per image, i.e. more unique blobs). The
+two `logstash_*` roles ran `apache/kafka` when this example pulled from Docker
+Hub; Kafka has no anonymously-pullable home on the registries this lab can
+reach, and Logstash keeps the catalog inside the Elastic product family.
 
 All of this lives in one place, `local.WORKLOAD_ROLES` in
 [`workloads.tf`](./workloads.tf), and a `check` block in the same file asserts
@@ -60,17 +146,19 @@ local.WORKLOADS ──> zedcloud_application          (edge_apps.tf)          27
                 ──> zedcloud_application_instance (edge_app_instances.tf) 27x
 ```
 
-plus the singletons: brand, model, project, 2 datastores, 5 images, the
-edge-node, one local NAT network-instance which all 27 app-instances share, and
-the generated PostgreSQL password — and the nine `zedamigo_netns` /
-`zedamigo_tap` / `zedamigo_dhcp_server` triplets of the extra management ports,
-which `for_each` over `local.EXTRA_MGMT_PORTS` in the same way. 127 resources in
-total.
+plus the **27 images** (`zedcloud_image.CONTAINER`, one per distinct
+`repo:tag` of the catalog, `for_each` over `local.CONTAINER_IMAGE_SET` in
+[`images.tf`](./images.tf)) and the singletons: brand, model, project,
+2 datastores, the edge-node, one local NAT network-instance which all 27
+app-instances share, and the generated PostgreSQL password — and the nine
+`zedamigo_netns` / `zedamigo_tap` / `zedamigo_dhcp_server` triplets of the
+extra management ports, which `for_each` over `local.EXTRA_MGMT_PORTS` in the
+same way. 148 resources in total.
 
 ### Why one edge-app definition per *replica* and not per *role*
 
 Normally you would define 5 edge-apps and deploy 27 instances of them. That does
-not work here, for two independent reasons:
+not work here, for three independent reasons:
 
 1. **RAM cannot be set per instance.** `vminfo` of a `zedcloud_application_instance`
    can override `cpus`, but its `memory` attribute is read-only — RAM always
@@ -80,6 +168,10 @@ not work here, for two independent reasons:
    by *label*, and Zedcloud resolves a label to at most one volume-instance per
    edge-node. All 27 replicas land on the *same* edge-node, so each one needs its
    own label — and the label is part of the manifest.
+3. **Every replica pins its own image version.** The image reference is part of
+   the manifest too, and 27 distinct images is the precondition for the
+   [downloader crash](#reproducing-the-downloader-crash) this example
+   reproduces.
 
 ## The two kinds of volume
 
@@ -172,7 +264,7 @@ container image Zedcloud cannot know the size upfront, so `image_size_bytes` is
 
 ## Networking and reachability
 
-### Ten management ports, one of which works
+### Ten management ports, one of which matters
 
 | port | backed by | addressing | `cost` | reaches |
 | ---- | --------- | ---------- | -----: | ------- |
@@ -207,43 +299,19 @@ here it is the whole point: nine ports that look usable to EVE-OS and are not.
 
 The `cost` values are what make that arrangement observable rather than merely
 broken. EVE-OS uses the cheapest usable management port, so while `eth0` is up
-at cost 0 it carries everything and the other nine sit there holding leases.
+at cost 0 it carries everything — including all 27 image pulls, which the
+[crash reproduction](#reproducing-the-downloader-crash) depends on —
+and the other nine sit there holding leases.
 
-### Pulling the only working port out
-
-`zedamigo_wait_until.DISABLE_SLIRP_NIC` in [`edge_nodes.tf`](./edge_nodes.tf)
-runs after the edge-node VM has started. Its script is a single-shot probe —
-the resource owns the retrying — that does two things:
-
-1. Asks Zedcloud for the node's `runState`
-   (`GET /api/v1/devices/status-config`, filtered by device name, the record
-   picked out by id) and fails the attempt unless it is `RUN_STATE_BOOTING` or
-   `RUN_STATE_ONLINE`. Those are the first states that mean EVE-OS is actually
-   running and talking to the controller, as opposed to `RUN_STATE_PROVISIONED`
-   (or `ADMIN_STATE_REGISTERED`), which only mean the object exists.
-2. Connects to the VM's QMP socket and takes the user-mode NIC's link down:
-
-   ```json
-   {"execute":"set_link","arguments":{"name":"usernet0","up":false}}
-   ```
-
-`usernet0` is the id `zedamigo` gives the default `nic0` netdev, and `set_link`
-on a netdev propagates to the NIC peered with it, so from inside EVE-OS this is
-a carrier loss on `eth0`. The NIC is **not** unplugged: the interface stays, the
-guest's port numbering does not shift, and the same command with `"up": true`
-puts it back. To do that by hand, on the provider target:
-
-```
-printf '%s\n%s\n' '{"execute":"qmp_capabilities"}' \
-  '{"execute":"set_link","arguments":{"name":"usernet0","up":true}}' \
-  | socat -t 5 - "UNIX-CONNECT:$(tofu output -raw EDGE_NODE_QMP_SOCKET)"
-```
-
-The probe runs **on the provider `target`**, which is the reason to use
-`zedamigo_wait_until` rather than a `local-exec` provisioner: the QMP socket
-only exists next to the QEMU process, so with a remote `target` anything running
-locally would be looking in the wrong place. It needs `curl`, `jq` and `socat`
-installed there and says so if they are missing.
+An earlier version of this example took `eth0` down over QMP right after
+onboarding (a `zedamigo_wait_until` barrier issuing
+`{"execute":"set_link","arguments":{"name":"usernet0","up":false}}`), to watch
+EVE-OS attempt a failover across the nine dead ends. That barrier is gone:
+cutting the uplink stops the image pulls, and no pulls means no crash. The QMP
+socket path is still exported (`tofu output -raw EDGE_NODE_QMP_SOCKET`) if you
+want to simulate a carrier loss by hand — `set_link` with `"up": true` puts the
+link back, the NIC is never unplugged and the guest port numbering never
+shifts.
 
 ### The app-instance network
 
@@ -254,8 +322,8 @@ about scaling instance counts up.
 
 `uplink` is a *shared* port label meaning "the management ports", so it no
 longer resolves to `eth0` alone the way it did when this example had a single
-NIC: after the barrier has run, the network-instance can be moved onto one of
-the nine dead ends.
+NIC — but with `eth0` the only cost-0 port and the only one with a path
+anywhere, that is where it lands.
 
 Each app-instance also port-maps its service port to its own port on the
 edge-node, handed out from `10080` upwards in the alphabetical order of the
@@ -272,35 +340,22 @@ edgeview.
 
 ## Caveats
 
-- **The node goes offline, on purpose, and does not come back on its own.**
-  `eth0` is the only port with a path to the controller, so once
-  `DISABLE_SLIRP_NIC` has taken its link down the node stops reporting and
-  Zedcloud will show it offline (after a failover attempt across the nine
-  `10.99.N.0/24` ports, which is the thing worth watching). Nothing in the
-  config brings it back — put the link up again by hand with the `set_link …
-  "up": true` command [above](#pulling-the-only-working-port-out).
-- **The barrier fires long before the images are pulled.** It waits for
-  `RUN_STATE_BOOTING`, which EVE-OS reaches within a minute or two of booting,
-  and the 27 app-instances need several GB of container images off the internet.
-  If you want the workloads to actually come up first, wait for
-  `RUN_STATE_ONLINE` only, or add a second condition to the probe. As written,
-  expect the app-instances to be stuck downloading.
-- **The Zedcloud API token ends up on the target.** `zedamigo_wait_until` has no
-  way to pass a secret separately from the script, so `var.ZEDEDA_CLOUD_TOKEN`
-  is interpolated into `script` — which means it is in the Terraform state and
-  in `<lib_path>/wait_until/<id>/wait_until.sh` on the provider target. Terraform
-  does propagate the variable's `sensitive` flag, so it is redacted in plan
-  output and marked sensitive in state, but it is not encrypted at rest in
-  either place. Use a token you are willing to leave there.
-- **The probe needs `curl`, `jq` and `socat` on the provider target** — not on
-  the machine running `tofu`, unless they are the same machine. A missing tool
-  is reported once per attempt until `timeout` expires, because the resource has
-  no notion of a fatal exit, and the message includes the `PATH` the script
-  searched. `zedamigo_wait_until` injects no `PATH`, so the script *adds* the
-  usual directories to whatever the target's non-interactive shell handed it
-  rather than overwriting it — overwriting breaks targets which keep their tools
-  somewhere else entirely, e.g. NixOS' `/run/current-system/sw/bin`, where the
-  tools are plainly there but `PATH=/usr/bin:...` cannot see them.
+- **The node reboots itself mid-apply — that is the point.** Expect Zedcloud to
+  show the node unreachable for a few minutes somewhere in the download phase,
+  and the `Too large message … downloader/MetricsMap` line in
+  `/persist/log/reboot-reason.log` afterwards; see
+  [the reproduction section](#reproducing-the-downloader-crash). The
+  node recovers on its own: verified blobs survive in `/persist`, so the
+  post-reboot session finishes the remaining downloads with a near-empty
+  metrics map. If it ever crash-*loops* instead, that just means the first
+  session got very few blobs downloaded — it will converge after the next
+  reboot for the same reason.
+- **Registry throttling shows up as content-tree errors, not failed applies.**
+  All 27 images are pulled anonymously. `docker.elastic.co` imposes no pull
+  limits; `public.ecr.aws` throttles anonymous request *bursts* per IP with
+  `429`s, which EVE-OS retries with backoff — the redis/postgres downloads may
+  simply lag behind the Elastic ones. If an app-instance sits in an error
+  state naming a `429` or `Too Many Requests`, that is what it is.
 - **The containers start, but they do not form clusters.** Each replica is
   configured to come up *standalone*; nothing points the Kibanas at an
   Elasticsearch, makes the Kafka nodes share a KRaft quorum or makes a
@@ -314,8 +369,12 @@ edgeview.
   `EDGE_NODE_CPUS` / `EDGE_NODE_MEM_GB` / `EDGE_NODE_DISK_MB` can be lowered to
   try the config out on something smaller; the 27 app-instances need 38 vCPU,
   61GB and 43GB of volumes plus whatever EVE-OS itself takes.
-- **27 image pulls.** The edge-node downloads 5 distinct container images, the
-  Elasticsearch one alone is well over 1GB, so give the first apply time.
+- **27 image pulls, all distinct.** The edge-node downloads 27 distinct
+  container images — roughly 10–15GB, the Elasticsearch and Kibana ones alone
+  are ~1GB each — so give the first apply time. This is deliberate; making
+  replicas share images again is exactly what stops the crash from
+  reproducing, and the `check` block in `workloads.tf` warns if the catalog
+  regresses to fewer distinct tags than app-instances.
 - **There is a hard limit of 63 app-instances per edge-node, and VNC being
   disabled does not help.** Zedcloud allocates a *VNC display number* out of a
   per-edge-node pool of 63 for **every** app-instance it creates, whether or not
@@ -378,17 +437,18 @@ edgeview.
 tofu init
 tofu apply -parallelism=2
 tofu output RESOURCE_BUDGET
+tofu output CONTAINER_IMAGE_CATALOG
 tofu output EDGE_APP_INSTANCES
 tofu output -json POSTGRES_CREDENTIALS
 tofu output EXTRA_MGMT_PORTS
-tofu output SLIRP_NIC_DISABLED
 ```
 
-The apply blocks on `zedamigo_wait_until.DISABLE_SLIRP_NIC` until the node
-reports in to Zedcloud, which is most of an EVE-OS boot. A provider cannot
-stream output the way `local-exec` does, so run with `TF_LOG=info` to watch the
-attempts go by; the full per-attempt output stays under
-`<lib_path>/wait_until/<id>/attempts/` on the target either way.
+The apply finishes once the Zedcloud objects exist; the interesting part —
+onboarding, 27 image downloads, the downloader crash and the self-reboot —
+happens on the node afterwards. Watch it via `tofu output EDGE_NODE_SSH_PORT`
++ SSH, the serial console log of the VM, or the edge-node events in Zedcloud;
+see [the reproduction section](#reproducing-the-downloader-crash)
+for what to look for.
 
 The low `-parallelism` is deliberate, and now for two independent reasons:
 creating the 27 app-instances concurrently races Zedcloud's per-edge-node VNC
