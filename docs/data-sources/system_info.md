@@ -3,12 +3,12 @@
 page_title: "zedamigo_system_info Data Source - zedamigo"
 subcategory: ""
 description: |-
-  The system info data source returns the information about number of CPUs and system memory, currently the total and used values.
+  The system info data source returns information about the number of CPUs and the system memory, currently the total and used values, of the provider's `target` host.
 ---
 
 # zedamigo_system_info (Data Source)
 
-The system info data source returns the information about number of CPUs and system memory, currently the total and used values.
+The system info data source returns information about the number of CPUs and the system memory, currently the total and used values, of the provider's `target` host.
 
 ## Example Usage
 
@@ -21,8 +21,8 @@ data "zedamigo_system_info" "example" {}
 
 ### Read-Only
 
-- `cpus` (Number) Total number of logical CPUs of the system
-- `id` (String) System info data source identifier
-- `mem_total_bytes` (Number) Total system memory in bytes
-- `mem_used_bytes` (Number) Used system memory in bytes
-- `mem_used_percent` (Number) Used system memory as a percentage of total
+- `cpus` (Number) Total number of logical CPUs of the target host
+- `id` (String) System info data source identifier: the hostname of the target host
+- `mem_total_bytes` (Number) Total memory of the target host, in bytes
+- `mem_used_bytes` (Number) Used memory of the target host, in bytes
+- `mem_used_percent` (Number) Used memory of the target host as a percentage of total
