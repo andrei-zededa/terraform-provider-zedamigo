@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	osexec "os/exec"
 	osuser "os/user"
 	"path"
 	"path/filepath"
@@ -478,12 +479,67 @@ func resolveRemoteLibPath(ctx context.Context, ex exec.Executor) (string, error)
 	return path.Join(base, DefaultZedAmigoLibPath), nil
 }
 
+// isDevVersion reports whether the provider version is a local dev or test
+// build rather than a published release, and so cannot be provisioned onto a
+// target by downloading a release artifact.
+func isDevVersion(version string) bool {
+	return version == "" || version == "dev" || version == "test"
+}
+
+// bootstrapDevBinary provisions the provider binary onto the target for a dev
+// build: it cross-compiles a target-arch binary from the source checkout, on
+// the provider host, and uploads it. Returns the path of the uploaded binary on
+// the target.
+//
+// This is the dev counterpart of bootstrapRemoteBinary, which can only fetch a
+// published release. srcDir is injected at build time by `make dev-install`.
+func bootstrapDevBinary(ctx context.Context, ex exec.Executor, libPath, srcDir, goos, goarch string) (string, error) {
+	if srcDir == "" {
+		return "", fmt.Errorf("this is a dev build with no embedded source directory, so the provider can't be cross-compiled for the target; " +
+			"rebuild and install it with `make dev-install`, or set ssh.remote_binary_path to a binary already on the target")
+	}
+
+	goBin, err := osexec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("can't find the `go` toolchain locally, which is needed to cross-compile the provider for the target: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "zedamigo-xbuild-")
+	if err != nil {
+		return "", fmt.Errorf("can't create a temporary build directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	outPath := filepath.Join(tmpDir, "terraform-provider-zedamigo")
+
+	// The same build flags as .goreleaser.yml (CGO off, osusergo/netgo) so the
+	// cross-compile stays pure Go and works from any host toward the target.
+	// version and srcDir are carried over so the uploaded binary identifies
+	// itself the same way as the one that built it.
+	cmd := osexec.CommandContext(ctx, goBin, "build", "-trimpath", "-tags", "osusergo netgo", "-o", outPath, ".")
+	cmd.Dir = srcDir
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("cross-compiling the provider for %s/%s failed: %w; output: %s",
+			goos, goarch, err, strings.TrimSpace(string(out)))
+	}
+
+	remoteBin := path.Join(libPath, "bin", "terraform-provider-zedamigo")
+	if err := ex.MkdirAll(ctx, path.Dir(remoteBin), 0o755); err != nil {
+		return "", fmt.Errorf("can't create the remote bin directory: %w", err)
+	}
+	if _, err := ex.Upload(ctx, outPath, remoteBin, 0o755); err != nil {
+		return "", fmt.Errorf("can't upload the cross-compiled provider binary to the target: %w", err)
+	}
+
+	return remoteBin, nil
+}
+
 // bootstrapRemoteBinary ensures the provider binary is present on the remote
 // host and returns its path. It runs the repo install script (pinned to the
 // provider's version) in binary-only mode; the script auto-detects the remote
 // architecture and prints the installed binary path as its final stdout line.
 func bootstrapRemoteBinary(ctx context.Context, ex exec.Executor, libPath, version string) (string, error) {
-	if version == "" || version == "dev" || version == "test" {
+	if isDevVersion(version) {
 		return "", fmt.Errorf("cannot bootstrap the remote provider binary for version %q: set ssh.remote_binary_path to a pre-installed binary on the target", version)
 	}
 

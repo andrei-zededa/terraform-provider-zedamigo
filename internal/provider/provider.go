@@ -85,6 +85,11 @@ type ZedAmigoProvider struct {
 	// provider is built and ran locally, and "test" when running acceptance
 	// testing.
 	version string
+	// srcDir is the absolute path of the provider's source checkout, injected
+	// at build time via -ldflags for dev builds (see the `dev-install` Makefile
+	// target). It lets a dev build cross-compile a target-arch binary when
+	// driving a remote target. Empty for released builds.
+	srcDir string
 }
 
 // ZedAmigoProviderModel describes the provider data model.
@@ -218,14 +223,19 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	// LocalExecutor runs everything on the machine running the provider; for any
 	// other target a SSHExecutor runs everything on the remote host. From here
 	// on, filesystem and command operations go through zaConf.Exec.
+	// Non-nil only for a remote target; the binary provisioning below needs it
+	// after the target platform has been detected.
+	var sshExec *exec.SSHExecutor
+
 	if zaConf.Target == DefaultZedAmigoTarget {
 		zaConf.Exec = exec.NewLocal(zaConf.UseSudo)
 	} else {
-		sshExec, err := buildSSHExecutor(zaConf.Target, conf.SSH, zaConf.UseSudo)
+		se, err := buildSSHExecutor(zaConf.Target, conf.SSH, zaConf.UseSudo)
 		if err != nil {
 			resp.Diagnostics.AddError("Invalid SSH configuration", err.Error())
 			return
 		}
+		sshExec = se
 		zaConf.Exec = sshExec
 
 		// When lib_path was not set explicitly, resolve the default from the
@@ -240,23 +250,6 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 			zaConf.LibPath = rp
 			ctx = tflog.SetField(ctx, "lib_path", zaConf.LibPath)
 		}
-
-		// Resolve the provider binary path on the target (used by the
-		// self-invoked daemons). Prefer an explicit remote_binary_path; otherwise
-		// bootstrap it via the install script pinned to this provider's version.
-		var rbp types.String
-		if conf.SSH != nil {
-			rbp = conf.SSH.RemoteBinaryPath
-		}
-		selfPath := sshStr(rbp, "ZEDAMIGO_REMOTE_BINARY_PATH")
-		if selfPath == "" {
-			selfPath, err = bootstrapRemoteBinary(ctx, sshExec, zaConf.LibPath, p.version)
-			if err != nil {
-				resp.Diagnostics.AddError("Can't provision the provider binary on the target", err.Error())
-				return
-			}
-		}
-		sshExec.SetSelfPath(selfPath)
 	}
 
 	if err := zaConf.Exec.MkdirAll(ctx, zaConf.LibPath, 0o700); err != nil {
@@ -283,6 +276,34 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 	zaConf.TargetOS = tOS
 	zaConf.TargetArch = tArch
 	ctx = tflog.SetField(ctx, "target_platform", tOS+"/"+tArch)
+
+	// Resolve the provider binary path on the target (used by the self-invoked
+	// daemons). Prefer an explicit remote_binary_path; otherwise provision it:
+	// a released version by running the install script pinned to that version on
+	// the target, a dev build by cross-compiling for the target and uploading.
+	//
+	// This runs after the platform detection above because the dev path needs
+	// the target's GOOS/GOARCH to cross-compile for.
+	if sshExec != nil {
+		var rbp types.String
+		if conf.SSH != nil {
+			rbp = conf.SSH.RemoteBinaryPath
+		}
+		selfPath := sshStr(rbp, "ZEDAMIGO_REMOTE_BINARY_PATH")
+		if selfPath == "" {
+			var err error
+			if isDevVersion(p.version) {
+				selfPath, err = bootstrapDevBinary(ctx, sshExec, zaConf.LibPath, p.srcDir, tOS, tArch)
+			} else {
+				selfPath, err = bootstrapRemoteBinary(ctx, sshExec, zaConf.LibPath, p.version)
+			}
+			if err != nil {
+				resp.Diagnostics.AddError("Can't provision the provider binary on the target", err.Error())
+				return
+			}
+		}
+		sshExec.SetSelfPath(selfPath)
+	}
 
 	if zaConf.UseSudo {
 		sudo, err := zaConf.Exec.LookPath(ctx, "sudo")
@@ -371,10 +392,11 @@ func newResourceID() (string, error) {
 	return fmt.Sprintf("%08x", b), nil
 }
 
-func New(version string) func() provider.Provider {
+func New(version, srcDir string) func() provider.Provider {
 	return func() provider.Provider {
 		return &ZedAmigoProvider{
 			version: version,
+			srcDir:  srcDir,
 		}
 	}
 }
