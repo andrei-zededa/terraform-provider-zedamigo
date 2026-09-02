@@ -1,5 +1,5 @@
 resource "zedamigo_netns" "TEST_NS_A" {
-  name = "TEST_NS_A"
+  name = "TEST_NS_A_${var.config_suffix}"
 }
 
 resource "zedamigo_dhcp_server" "DHCP_A" {
@@ -23,11 +23,24 @@ resource "zedamigo_tap" "TAP_AAAA_1" {
   mtu   = "1500"
   state = "up"
   group = "kvm"
-  netns = zedamigo_netns.TEST_NS_A.name
+  # IPv4 address directly configured on the TAP interface since for this "network"
+  # we don't use a bridge, only one node.
+  ipv4_address = "10.99.1.1/24"
+  netns        = zedamigo_netns.TEST_NS_A.name
 }
 
 resource "zedamigo_netns" "TEST_NS_B" {
-  name = "TEST_NS_B"
+  name = "TEST_NS_B_${var.config_suffix}"
+}
+
+# We create a bridge so multiple nodes can be connected together, although this
+# example has a single node.
+resource "zedamigo_bridge" "BRIDGE_B" {
+  name         = "brB-${var.config_suffix}"
+  mtu          = "1500"
+  state        = "up"
+  ipv4_address = "10.99.2.1/24"
+  netns        = zedamigo_netns.TEST_NS_B.name
 }
 
 resource "zedamigo_dhcp_server" "DHCP_B" {
@@ -47,9 +60,10 @@ resource "zedamigo_dhcp_server" "DHCP_B" {
 }
 
 resource "zedamigo_tap" "TAP_AAAA_2" {
-  name  = "tap2-AA-${var.config_suffix}"
-  mtu   = "1500"
-  state = "up"
-  group = "kvm"
-  netns = zedamigo_netns.TEST_NS_B.name
+  name   = "tap2-AA-${var.config_suffix}"
+  mtu    = "1500"
+  state  = "up"
+  group  = "kvm"
+  netns  = zedamigo_netns.TEST_NS_B.name
+  master = zedamigo_bridge.BRIDGE_B.name
 }

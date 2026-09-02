@@ -95,7 +95,7 @@ resource "zedamigo_disk_image" "empty_disk" {
 #### `docker run ... lfedge/eve installer_iso`.
 resource "zedamigo_eve_installer" "eve_os_installer" {
   name            = "EVE-OS_kvm_${lower(var.EDGE_NODE_ARCH)}"
-  tag             = "16.0.1-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
+  tag             = "17.0.0-lts-kvm-${lower(var.EDGE_NODE_ARCH)}"
   cluster         = var.ZEDEDA_CLOUD_URL
   authorized_keys = var.edge_node_ssh_pub_key
   grub_cfg        = <<-EOF
@@ -149,7 +149,7 @@ resource "zedamigo_installed_edge_node" "ENODE_TEST_INSTALL_AAAA" {
 #### produced by VM on it's serial console.
 resource "zedamigo_edge_node" "ENODE_TEST_VM_AAAA" {
   name = "ENODE_TEST_VM_AAAA_${var.config_suffix}"
-  cpus = 2 
+  cpus = 2
   mem  = "4G"
   # See comment for zedcloud_edgenode.ENODE_TEST_AAAA.serialno .
   serial_no          = zedamigo_installed_edge_node.ENODE_TEST_INSTALL_AAAA.serial_no
