@@ -32,6 +32,10 @@ var (
 	buildDate = ""
 	builtBy   = ""
 	treeState = ""
+	// srcDir is the absolute path of the source checkout, injected at build
+	// time for dev builds (see the `dev-install` Makefile target). It lets a dev
+	// build cross-compile a target-arch binary when driving a remote target.
+	srcDir = ""
 )
 
 var (
@@ -244,7 +248,7 @@ func main() {
 		Debug:   *debug,
 	}
 
-	err := providerserver.Serve(context.Background(), provider.New(version), opts)
+	err := providerserver.Serve(context.Background(), provider.New(version, srcDir), opts)
 	if err != nil {
 		log.Fatal(err.Error())
 	}

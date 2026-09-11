@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,4 +300,43 @@ func TestForwardAgentSocket(t *testing.T) {
 			t.Fatalf("an explicit forward_agent = false must win, got %q", sock)
 		}
 	})
+}
+
+func TestIsDevVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "", want: true},
+		{version: "dev", want: true},
+		{version: "test", want: true},
+		{version: "0.13.1", want: false},
+		{version: "v0.13.1", want: false},
+		// A CI dev-tag release IS a real release: its artifacts are published,
+		// so bootstrapRemoteBinary can fetch it and no cross-compile is needed.
+		{version: "0.0.0-dev.branchfoo+commitabc1234", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := isDevVersion(tt.version); got != tt.want {
+				t.Errorf("isDevVersion(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBootstrapDevBinaryWithoutSrcDir(t *testing.T) {
+	// With no srcDir there is nothing to cross-compile, so this must fail before
+	// touching the executor -- hence the nil executor here -- and the message
+	// must point at both ways out.
+	_, err := bootstrapDevBinary(t.Context(), nil, "/tmp/libpath", "", "linux", "amd64")
+	if err == nil {
+		t.Fatal("bootstrapDevBinary() with an empty srcDir = nil error, want an error")
+	}
+	for _, want := range []string{"make dev-install", "ssh.remote_binary_path"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
 }

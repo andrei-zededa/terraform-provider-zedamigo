@@ -307,6 +307,46 @@ to a log file. On **macOS** this setting is ignored — vfkit does not support
 socket-based serial devices, so output is always written directly to the log file.
 In both cases the `serial_console_log` read-only attribute points to the log file.
 
+### Install a local dev build
+
+To run a build from a source checkout rather than a release, use the
+`dev-install` target:
+
+```shell
+make dev-install
+```
+
+It builds the provider for the current host and installs it into the local
+plugin mirror, so a config can reference it as:
+
+```hcl
+zedamigo = {
+  source  = "localhost/andrei-zededa/zedamigo"
+  version = "0.0.1" # or whatever DEV_VERSION was set to
+}
+```
+
+`DEV_VERSION` (default `0.0.1`) is only the directory name the plugin mirror
+looks up; the provider still reports its version as `dev`.
+
+That distinction matters for a **remote** `target`. The provider needs a
+target-native copy of itself there for the self-invoked daemons (the DHCP/RA
+servers, `gvproxy`, the socket tailer, ...). For a released version it fetches
+one by running `install.sh` on the target, but a dev build has no release to
+fetch. So a dev build instead cross-compiles for the target's GOOS/GOARCH from
+the checkout that `dev-install` recorded, and uploads the result to
+`<lib_path>/bin/`. The cross-compile is pure Go (`CGO_ENABLED=0`, `osusergo
+netgo`), so driving a Linux target from macOS needs no C toolchain -- only `go`
+on the machine running the provider.
+
+Two things to know:
+
+- The cross-compile inherits your environment, including `GOTOOLCHAIN`. If you
+  pin `GOTOOLCHAIN=local` and your local Go is older than the `go` directive in
+  `go.mod`, the build fails and says so.
+- Setting `ssh.remote_binary_path` skips all of this and uses the binary already
+  at that path on the target.
+
 ### Install the zedamigo terraform provider locally
 
 zedamigo works well both with *terraform* and *OpenTofu* (recent versions).
