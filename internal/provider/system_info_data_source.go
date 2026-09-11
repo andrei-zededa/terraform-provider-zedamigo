@@ -5,15 +5,11 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/mem"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -45,35 +41,35 @@ func (d *SystemInfo) Metadata(ctx context.Context, req datasource.MetadataReques
 
 func (d *SystemInfo) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The system info data source returns the information about number of CPUs and system memory, currently the total and used values.",
+		Description: "The system info data source returns information about the number of CPUs and the system memory, currently the total and used values, of the provider's target host.",
 
 		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "The system info data source returns the information about number of CPUs and system memory, currently the total and used values.",
+		MarkdownDescription: "The system info data source returns information about the number of CPUs and the system memory, currently the total and used values, of the provider's `target` host.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description:         "System info data source identifier",
-				MarkdownDescription: "System info data source identifier",
+				Description:         "System info data source identifier: the hostname of the target host",
+				MarkdownDescription: "System info data source identifier: the hostname of the target host",
 				Computed:            true,
 			},
 			"cpus": schema.Int32Attribute{
-				Description:         "Total number of logical CPUs of the system",
-				MarkdownDescription: "Total number of logical CPUs of the system",
+				Description:         "Total number of logical CPUs of the target host",
+				MarkdownDescription: "Total number of logical CPUs of the target host",
 				Computed:            true,
 			},
 			"mem_total_bytes": schema.Int64Attribute{
-				Description:         "Total system memory in bytes",
-				MarkdownDescription: "Total system memory in bytes",
+				Description:         "Total memory of the target host, in bytes",
+				MarkdownDescription: "Total memory of the target host, in bytes",
 				Computed:            true,
 			},
 			"mem_used_bytes": schema.Int64Attribute{
-				Description:         "Used system memory in bytes",
-				MarkdownDescription: "Used system memory in bytes",
+				Description:         "Used memory of the target host, in bytes",
+				MarkdownDescription: "Used memory of the target host, in bytes",
 				Computed:            true,
 			},
 			"mem_used_percent": schema.Float64Attribute{
-				Description:         "Used system memory as a percentage of total",
-				MarkdownDescription: "Used system memory as a percentage of total",
+				Description:         "Used memory of the target host as a percentage of total",
+				MarkdownDescription: "Used memory of the target host as a percentage of total",
 				Computed:            true,
 			},
 		},
@@ -109,38 +105,28 @@ func (d *SystemInfo) Read(ctx context.Context, req datasource.ReadRequest, resp 
 		return
 	}
 
-	h, err := os.Hostname()
-	if err != nil {
+	if d.providerConf == nil {
 		resp.Diagnostics.AddError("System Info Data Source Error",
-			fmt.Sprintf("Unable to get system hostname, got error: %s", err))
+			"The provider is not configured. Please report this issue to the provider developers.")
 		return
 	}
-	if len(h) < 1 {
-		resp.Diagnostics.AddError("System Info Data Source Error",
-			fmt.Sprintf("Unable to get system hostname, got empty string"))
-		return
-	}
-	data.ID = types.StringValue(h)
 
-	x, err := cpu.Counts(true)
+	// Report the TARGET's info, not the provider host's: this data source is
+	// used to size VMs against the host that will actually run them.
+	si, err := gatherSysInfo(ctx, d.providerConf.Exec, d.providerConf.TargetOS)
 	if err != nil {
 		resp.Diagnostics.AddError("System Info Data Source Error",
-			fmt.Sprintf("Unable to get system CPUs info, got error: %s", err))
+			fmt.Sprintf("Unable to get the system info of target %q: %s", d.providerConf.Target, err))
 		return
 	}
-	data.CPUs = types.Int32Value(int32(x))
 
-	v, err := mem.VirtualMemory()
-	if err != nil {
-		resp.Diagnostics.AddError("System Info Data Source Error",
-			fmt.Sprintf("Unable to get system memory info, got error: %s", err))
-		return
-	}
+	data.ID = types.StringValue(si.Hostname)
+	data.CPUs = types.Int32Value(int32(si.CPUs)) //nolint:gosec // a plausible CPU count always fits.
 
 	// TODO: We should check that the conversions DO NOT overflow.
-	data.MemTotalBytes = types.Int64Value(int64(v.Total))
-	data.MemUsedBytes = types.Int64Value(int64(v.Used))
-	data.MemUsedPercent = types.Float64Value(v.UsedPercent)
+	data.MemTotalBytes = types.Int64Value(int64(si.MemTotalBytes))
+	data.MemUsedBytes = types.Int64Value(int64(si.MemUsedBytes))
+	data.MemUsedPercent = types.Float64Value(si.MemUsedPercent)
 
 	// Write logs using the tflog package
 	// Documentation: https://terraform.io/plugin/log
