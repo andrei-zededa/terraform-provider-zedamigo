@@ -4,7 +4,9 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 
@@ -14,7 +16,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// Embed OVMF files.
+// Embed OVMF files: EVE-OS's own x86_64 OVMF build (lf-edge/eve pkg/uefi,
+// built with TPM2 support so a zedamigo_swtpm gets a measured boot). Origin,
+// checksums and how to refresh them: embedded_ovmf/README.md.
 //
 //go:embed embedded_ovmf/OVMF_CODE.fd
 //go:embed embedded_ovmf/OVMF_VARS.fd
@@ -37,28 +41,13 @@ func configurePlatformTools(ctx context.Context, zaConf *ZedAmigoProviderConfig,
 }
 
 func configureQEMUTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, resp *provider.ConfigureResponse) {
-	// Extract OVMF files onto the target.
-	if err := zaConf.Exec.MkdirAll(ctx, filepath.Join(zaConf.LibPath, "embedded_ovmf"), 0o700); err != nil {
-		resp.Diagnostics.AddError(
-			fmt.Sprintf("%s", err),
-			fmt.Sprintf("Failed to create lib_path/embedded_ovmf directory: %v", err),
-		)
+	// UEFI firmware: the ovmf_code/ovmf_vars overrides, or the embedded OVMF
+	// extracted onto the target.
+	baseOVMFCode, baseOVMFVars, err := resolveOVMF(ctx, zaConf.Exec, zaConf.LibPath, zaConf.OVMFCode, zaConf.OVMFVars)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to set up the UEFI (OVMF) firmware.", err.Error())
 		return
 	}
-
-	for _, f := range []string{filepath.Join("embedded_ovmf", "OVMF_CODE.fd"), filepath.Join("embedded_ovmf", "OVMF_VARS.fd")} {
-		if err := extractFileIfNotExists(ctx, zaConf.Exec, f, filepath.Join(zaConf.LibPath, f)); err != nil {
-			resp.Diagnostics.AddError(
-				fmt.Sprintf("%s", err),
-				fmt.Sprintf("Failed to extract OVMF file '%s': %v", f, err),
-			)
-		}
-	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	baseOVMFCode := filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_CODE.fd")
-	baseOVMFVars := filepath.Join(zaConf.LibPath, "embedded_ovmf", "OVMF_VARS.fd")
 
 	// Look up QEMU.
 	q, err := zaConf.Exec.LookPath(ctx, "qemu-system-x86_64")
@@ -233,6 +222,75 @@ func configureVFKitTools(ctx context.Context, zaConf *ZedAmigoProviderConfig, re
 // extractFileIfNotExists checks if a file exists at targetPath on the target,
 // and if not, extracts it from the embedded filesystem (read locally) and
 // writes it to the target via the executor.
+// embeddedOVMFFiles are the firmware files embedded in the provider binary,
+// as paths inside embeddedOVMF.
+var embeddedOVMFFiles = []string{"embedded_ovmf/OVMF_CODE.fd", "embedded_ovmf/OVMF_VARS.fd"}
+
+// embeddedOVMFVersion returns a short, stable identifier of the embedded
+// firmware: the first 12 hex digits of the SHA-256 over all embedded files.
+func embeddedOVMFVersion() (string, error) {
+	h := sha256.New()
+	for _, f := range embeddedOVMFFiles {
+		data, err := embeddedOVMF.ReadFile(f)
+		if err != nil {
+			return "", fmt.Errorf("error reading embedded file %s: %w", f, err)
+		}
+		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12], nil
+}
+
+// resolveOVMF returns the firmware code image and variable-store template the
+// VMs boot with.
+//
+// A non-empty codeOverride / varsOverride (provider ovmf_code / ovmf_vars) is
+// used as-is after checking it exists on the target. Otherwise the embedded
+// file is extracted to lib_path/embedded_ovmf/<version>/, where <version> is
+// derived from the embedded content. Versioning the directory matters because
+// extraction never overwrites an existing file: with a fixed path, a provider
+// upgrade that ships a different firmware would silently keep booting VMs on
+// whatever an older release once extracted. Older directories are left in
+// place, so VMs (re)started from a saved command line keep finding theirs.
+func resolveOVMF(ctx context.Context, ex exec.Executor, libPath, codeOverride, varsOverride string) (string, string, error) {
+	for _, o := range []struct{ name, path string }{{"ovmf_code", codeOverride}, {"ovmf_vars", varsOverride}} {
+		if o.path == "" {
+			continue
+		}
+		if _, err := ex.Stat(ctx, o.path); err != nil {
+			return "", "", fmt.Errorf("%s %q is not usable on the target: %w", o.name, o.path, err)
+		}
+	}
+	if codeOverride != "" && varsOverride != "" {
+		return codeOverride, varsOverride, nil
+	}
+
+	ver, err := embeddedOVMFVersion()
+	if err != nil {
+		return "", "", err
+	}
+	dir := filepath.Join(libPath, "embedded_ovmf", ver)
+	if err := ex.MkdirAll(ctx, dir, 0o700); err != nil {
+		return "", "", fmt.Errorf("failed to create %s: %w", dir, err)
+	}
+
+	extracted := make([]string, len(embeddedOVMFFiles))
+	for i, f := range embeddedOVMFFiles {
+		extracted[i] = filepath.Join(dir, filepath.Base(f))
+		if err := extractFileIfNotExists(ctx, ex, f, extracted[i]); err != nil {
+			return "", "", fmt.Errorf("failed to extract OVMF file %q: %w", f, err)
+		}
+	}
+
+	code, vars := extracted[0], extracted[1]
+	if codeOverride != "" {
+		code = codeOverride
+	}
+	if varsOverride != "" {
+		vars = varsOverride
+	}
+	return code, vars, nil
+}
+
 func extractFileIfNotExists(ctx context.Context, ex exec.Executor, embeddedPath, targetPath string) error {
 	if _, err := ex.Stat(ctx, targetPath); err == nil {
 		return nil

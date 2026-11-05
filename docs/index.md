@@ -87,6 +87,15 @@ created on `target`. Optional and if not specified it defaults to
 `$XDG_STATE_HOME/zedamigo/`, e.g. `$HOME/.local/state/zedamigo/`. For a
 remote `target` the default is resolved from the remote host's
 environment.
+- `ovmf_code` (String) Path on `target` to a UEFI firmware code image (e.g. an `OVMF_CODE.fd`)
+used for all VMs instead of the embedded one. Optional. The embedded
+default is EVE-OS's own OVMF build, which supports TPM 2.0 measured
+boot; override it only with a firmware that does too if the VMs use a
+`zedamigo_swtpm` (see the vTPM guide). Should come from the same build
+as `ovmf_vars`.
+- `ovmf_vars` (String) Path on `target` to a UEFI variable-store template (e.g. an
+`OVMF_VARS.fd`) copied for every new VM instead of the embedded one.
+Optional. Should come from the same firmware build as `ovmf_code`.
 - `ssh` (Block, Optional) SSH connection settings used when `target` is a remote host (anything other than
 `localhost`). All attributes are optional and each has a `ZEDAMIGO_SSH_*` environment
 variable fallback. Provide at least one authentication method: `password`,
