@@ -84,8 +84,14 @@ tpm2_pcrread                       # all banks, all PCRs
 tpm2_pcrread sha256:0,1,2,3,4,7    # the interesting boot-measurement PCRs
 ```
 
-A generic guest without measured boot shows all-zero PCRs; an EVE-OS guest
-populates them during boot (EVE seals its vault against these values). A safe
+PCRs 0 to 7 are extended by the UEFI firmware, so they are only populated when the
+firmware does a TPM 2.0 measured boot. The embedded OVMF (EVE-OS's own build, see
+`internal/provider/embedded_ovmf/README.md`) does; a firmware passed via the provider's
+`ovmf_code` must too. Without it these PCRs stay all-zero, and an EVE-OS 17.2+ guest then
+refuses to seal its vault key (`refusing to seal disk key: firmware anchor PCR(s) [0 4] are
+all-zero`) and stays in maintenance mode. With it, an EVE-OS guest populates PCRs 0 to 9 and
+seals its vault against them. Check the firmware handed over an event log:
+`ls /sys/kernel/security/tpm0/binary_bios_measurements` in the guest. A safe
 write test that does not disturb anything (PCR 23 is the debug PCR, reset on
 reboot):
 

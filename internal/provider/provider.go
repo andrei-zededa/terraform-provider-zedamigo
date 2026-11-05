@@ -68,6 +68,12 @@ type ZedAmigoProviderConfig struct {
 	// It is a LocalExecutor when Target is localhost and an SSHExecutor
 	// otherwise. Resources reach it as r.providerConf.Exec.
 	Exec exec.Executor
+
+	// OVMFCode and OVMFVars, when non-empty, are paths on Target to a UEFI
+	// firmware (code) image and its variable-store template, used instead of
+	// the embedded OVMF files. See resolveOVMF.
+	OVMFCode string
+	OVMFVars string
 }
 
 // NewDefaultZedAmigoProviderConfig creates a new ZedAmigProviderConfig with
@@ -89,10 +95,12 @@ type ZedAmigoProvider struct {
 
 // ZedAmigoProviderModel describes the provider data model.
 type ZedAmigoProviderModel struct {
-	Target  types.String `tfsdk:"target"`
-	LibPath types.String `tfsdk:"lib_path"`
-	UseSudo types.Bool   `tfsdk:"use_sudo"`
-	SSH     *SSHModel    `tfsdk:"ssh"`
+	Target   types.String `tfsdk:"target"`
+	LibPath  types.String `tfsdk:"lib_path"`
+	OVMFCode types.String `tfsdk:"ovmf_code"`
+	OVMFVars types.String `tfsdk:"ovmf_vars"`
+	UseSudo  types.Bool   `tfsdk:"use_sudo"`
+	SSH      *SSHModel    `tfsdk:"ssh"`
 }
 
 func (p *ZedAmigoProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -120,6 +128,25 @@ func (p *ZedAmigoProvider) Schema(ctx context.Context, req provider.SchemaReques
 				|$XDG_STATE_HOME/zedamigo/|, e.g. |$HOME/.local/state/zedamigo/|. For a
 				remote |target| the default is resolved from the remote host's
 				environment.`),
+				Optional: true,
+			},
+			"ovmf_code": schema.StringAttribute{
+				Description: "Path on `target` to a UEFI firmware code image used instead of the embedded OVMF_CODE.fd.",
+				MarkdownDescription: undent.Md(`
+				Path on |target| to a UEFI firmware code image (e.g. an |OVMF_CODE.fd|)
+				used for all VMs instead of the embedded one. Optional. The embedded
+				default is EVE-OS's own OVMF build, which supports TPM 2.0 measured
+				boot; override it only with a firmware that does too if the VMs use a
+				|zedamigo_swtpm| (see the vTPM guide). Should come from the same build
+				as |ovmf_vars|.`),
+				Optional: true,
+			},
+			"ovmf_vars": schema.StringAttribute{
+				Description: "Path on `target` to a UEFI variable-store template used instead of the embedded OVMF_VARS.fd.",
+				MarkdownDescription: undent.Md(`
+				Path on |target| to a UEFI variable-store template (e.g. an
+				|OVMF_VARS.fd|) copied for every new VM instead of the embedded one.
+				Optional. Should come from the same firmware build as |ovmf_code|.`),
 				Optional: true,
 			},
 			"use_sudo": schema.BoolAttribute{
@@ -194,6 +221,12 @@ func (p *ZedAmigoProvider) Configure(ctx context.Context, req provider.Configure
 
 	if !conf.LibPath.IsNull() {
 		zaConf.LibPath = conf.LibPath.ValueString()
+	}
+	if !conf.OVMFCode.IsNull() {
+		zaConf.OVMFCode = conf.OVMFCode.ValueString()
+	}
+	if !conf.OVMFVars.IsNull() {
+		zaConf.OVMFVars = conf.OVMFVars.ValueString()
 	}
 
 	if zaConf.LibPath == "" {
